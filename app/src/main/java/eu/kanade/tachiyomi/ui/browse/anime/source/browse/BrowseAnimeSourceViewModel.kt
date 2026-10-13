@@ -224,9 +224,12 @@ class BrowseAnimeSourceViewModel(
             }.flow.map { pagingData ->
                 pagingData.map {
                     networkToLocalAnime.await(it.toDomainAnime(sourceId))
-                        .let { localAnime -> getAnime.subscribe(localAnime.url, localAnime.source) }
-                        .filterNotNull()
-                        .stateIn(viewModelScope)
+                        .let { localAnime ->
+                            getAnime.subscribe(localAnime.url, localAnime.source)
+                                .filterNotNull()
+                                // Do not permanently collect a StateFlow for every browsed item.
+                                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), localAnime)
+                        }
                 }
                     .filter { !hideInLibraryItems || !it.value.favorite }
             }
