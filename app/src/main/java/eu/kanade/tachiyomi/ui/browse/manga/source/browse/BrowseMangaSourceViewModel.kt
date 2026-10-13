@@ -264,9 +264,18 @@ class BrowseMangaSourceViewModel(
             new = new.removeCovers(coverCache)
         } else {
             setMangaDefaultChapterFlags.await(manga)
-            addTracks.bindEnhancedTrackers(manga, source)
         }
+        // Persist library membership before optional tracker/network integration.
         updateManga.await(new.toMangaUpdate())
+        if (new.favorite) {
+            try {
+                addTracks.bindEnhancedTrackers(manga, source)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w("KirohaFavorites", "Optional tracker binding failed", error)
+            }
+        }
     }
 
     fun changeMangaFavorite(manga: Manga) {
