@@ -27,7 +27,6 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asFlow
@@ -213,8 +212,12 @@ class MangaDownloader(
                             it.status.value <= MangaDownload.State.DOWNLOADING.value
                         } // Ignore completed downloads, leave them in the queue
                         .groupBy { it.source }
-                        .toList().take(5) // Concurrently download from 5 different sources
-                        .flatMap { (_, downloads) -> downloads.take(downloadPreferences.numberOfDownloads.get()) }
+                        .toList().take(5)
+                        .flatMap { (_, downloads) -> downloads.take(2) }
+                        // The previous per-source limit multiplied by five sources, causing
+                        // up to 25 simultaneous chapter jobs (each fetching multiple pages).
+                        // Enforce one global cap to reduce CPU, network and thermal load.
+                        .take(downloadPreferences.numberOfDownloads.get().coerceIn(1, 5))
                     emit(activeDownloads)
 
                     if (activeDownloads.isEmpty()) break
