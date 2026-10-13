@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.domain.items.episode.model.NoEpisodesException
 import tachiyomi.domain.source.anime.repository.AnimeSourcePagingSourceType
 import kiroha.core.PageDeduplicator
 
@@ -46,8 +45,6 @@ abstract class AnimeSourcePagingSource(
         val animesPage = try {
             withIOContext {
                 requestNextPage(page.toInt())
-                    .takeIf { it.animes.isNotEmpty() }
-                    ?: throw NoEpisodesException()
             }
         } catch (e: Exception) {
             return LoadResult.Error(e)
