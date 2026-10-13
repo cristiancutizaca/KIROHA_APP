@@ -120,7 +120,7 @@ class MangaDownloader(
      * Whether the downloader is paused
      */
     @Volatile
-    var isPaused: Boolean = false
+    var isPaused: Boolean = store.isPaused()
 
     // The worker must wait for on-disk queue restoration before deciding it is empty.
     private val restorationJob: Job = scope.launch {
@@ -130,6 +130,9 @@ class MangaDownloader(
     suspend fun awaitRestoration() {
         restorationJob.join()
     }
+
+    /** A recovered paused queue must not be restarted just because the process relaunched. */
+    fun hasAutoResumeWork(): Boolean = !store.isPaused() && queueState.value.isNotEmpty()
 
     /**
      * Starts the downloader. It doesn't do anything if it's already running or there isn't anything
@@ -146,6 +149,7 @@ class MangaDownloader(
         pending.forEach { if (it.status != MangaDownload.State.QUEUE) it.status = MangaDownload.State.QUEUE }
 
         isPaused = false
+        store.setPaused(false)
 
         launchDownloaderJob()
 
@@ -186,6 +190,7 @@ class MangaDownloader(
             .filter { it.status == MangaDownload.State.DOWNLOADING }
             .forEach { it.status = MangaDownload.State.QUEUE }
         isPaused = true
+        store.setPaused(true)
     }
 
     /**
