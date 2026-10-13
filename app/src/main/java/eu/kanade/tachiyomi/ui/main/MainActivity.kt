@@ -804,6 +804,17 @@ class MainActivity : BaseActivity() {
         super.onResume()
         mpvConfig.copyFiles()
     }
+    override fun onStop() {
+        if (BuildConfig.DEBUG) {
+            val runtime = Runtime.getRuntime()
+            getSharedPreferences("kiroha_debug_lifecycle", MODE_PRIVATE).edit()
+                .putLong("last_background_at", System.currentTimeMillis())
+                .putLong("heap_bytes", runtime.totalMemory() - runtime.freeMemory())
+                .apply()
+        }
+        super.onStop()
+    }
+
     override fun onDestroy() {
         try {
             com.discord.socialsdk.DiscordSocialSdkInit.setEngineActivity(null)
