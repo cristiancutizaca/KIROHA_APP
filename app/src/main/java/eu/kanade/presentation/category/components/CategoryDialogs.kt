@@ -1,13 +1,13 @@
 package eu.kanade.presentation.category.components
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.unit.dp
 import eu.kanade.core.preference.asToggleableState
 import eu.kanade.presentation.category.visualName
 import tachiyomi.core.common.preference.CheckboxState
@@ -214,7 +215,7 @@ fun ChangeCategoryDialog(
         )
         return
     }
-    var selection by remember { mutableStateOf(initialSelection) }
+    var selection by remember(initialSelection) { mutableStateOf(initialSelection) }
     AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = {
@@ -250,40 +251,38 @@ fun ChangeCategoryDialog(
             Text(text = stringResource(MR.strings.action_move_category))
         },
         text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-            ) {
-                selection.forEach { checkbox ->
-                    val onChange: (CheckboxState<Category>) -> Unit = {
-                        val index = selection.indexOf(it)
-                        if (index != -1) {
-                            val mutableList = selection.toMutableList()
-                            mutableList[index] = it.next()
-                            selection = mutableList.toList()
+            // Lazy rendering prevents hundreds of category rows from being composed
+            // just to open the assignment dialog.
+            LazyColumn(modifier = Modifier.heightIn(max = 440.dp)) {
+                itemsIndexed(
+                    items = selection,
+                    key = { _, checkbox -> checkbox.value.id },
+                ) { index, checkbox ->
+                    val onChange: () -> Unit = {
+                        selection = selection.toMutableList().also { updated ->
+                            updated[index] = updated[index].next()
                         }
                     }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onChange(checkbox) },
+                            .clickable(onClick = onChange),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         when (checkbox) {
                             is CheckboxState.TriState -> {
                                 TriStateCheckbox(
                                     state = checkbox.asToggleableState(),
-                                    onClick = { onChange(checkbox) },
+                                    onClick = onChange,
                                 )
                             }
-
                             is CheckboxState.State -> {
                                 Checkbox(
                                     checked = checkbox.isChecked,
-                                    onCheckedChange = { onChange(checkbox) },
+                                    onCheckedChange = { onChange() },
                                 )
                             }
                         }
-
                         Text(
                             text = checkbox.value.visualName,
                             modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium),
