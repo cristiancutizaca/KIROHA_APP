@@ -996,7 +996,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     private fun fingerprintUniFile(file: UniFile): String {
+        // Must be byte-for-byte compatible with UniFileStorageProvider.fingerprint().
+        // Previously the recorder hashed only file names/sizes, while reindex also
+        // hashed metadata and content, marking legitimate completed copies as ERROR.
+        fun totalSize(current: UniFile): Long =
+            if (current.isDirectory) current.listFiles().orEmpty().sumOf(::totalSize)
+            else current.length().coerceAtLeast(0L)
+
         val digest = MessageDigest.getInstance("SHA-256")
+        digest.update("${totalSize(file)}:${file.lastModified()}".toByteArray())
+
         fun visit(current: UniFile, prefix: String) {
             if (current.isDirectory) {
                 current.listFiles().orEmpty().sortedBy { it.name.orEmpty() }.forEach {
@@ -1004,6 +1013,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 }
             } else {
                 digest.update("$prefix:${current.length()}".toByteArray())
+                current.openInputStream().use { input ->
+                    val buffer = ByteArray(8192)
+                    var remaining = 64 * 1024
+                    while (remaining > 0) {
+                        val n = input.read(buffer, 0, minOf(buffer.size, remaining))
+                        if (n <= 0) break
+                        digest.update(buffer, 0, n)
+                        remaining -= n
+                    }
+                }
             }
         }
         visit(file, file.name.orEmpty())
