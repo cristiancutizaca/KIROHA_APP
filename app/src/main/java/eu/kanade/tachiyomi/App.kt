@@ -778,7 +778,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // restoring libraries and active downloads, and was heating up slower phones.
         if (now - indexPrefs.getLong("last_reconcile_at", 0L) < 24 * 60 * 60 * 1_000L) return
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
-            kotlinx.coroutines.delay(45_000L)
+            try {
+                kotlinx.coroutines.delay(45_000L)
             // Never start a full filesystem walk while downloads are already queued.
             if (mangaDownloadManager.queueState.value.isNotEmpty() ||
                 animeDownloadManager.queueState.value.isNotEmpty()
@@ -813,7 +814,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     )
                 }
             }
-            indexPrefs.edit().putLong("last_reconcile_at", System.currentTimeMillis()).apply()
+                indexPrefs.edit().putLong("last_reconcile_at", System.currentTimeMillis()).apply()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                logcat(LogPriority.ERROR, error) { "Kiroha storage reconciliation failed; retry on next startup" }
+            }
         }
     }
 
@@ -822,12 +828,24 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             launch {
                 mangaDownloadManager.statusFlow().collect { download ->
-                    persistKirohaMangaDownload(device.deviceId, download)
+                    try {
+                        persistKirohaMangaDownload(device.deviceId, download)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        logcat(LogPriority.ERROR, error) { "Kiroha manga download recorder failed" }
+                    }
                 }
             }
             launch {
                 animeDownloadManager.statusFlow().collect { download ->
-                    persistKirohaAnimeDownload(device.deviceId, download)
+                    try {
+                        persistKirohaAnimeDownload(device.deviceId, download)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        logcat(LogPriority.ERROR, error) { "Kiroha anime download recorder failed" }
+                    }
                 }
             }
         }
