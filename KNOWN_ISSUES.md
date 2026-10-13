@@ -1,19 +1,38 @@
-# Kiroha v0.1 — Known Issues
+# Kiroha v0.1 — Problemas conocidos y validación
 
-## Correcciones P0/P1 del 13/10/2026 (sin validación física todavía)
+Actualizado: 13/10/2026. **Rama de trabajo: `main`. Cambios de fuente aplicados, compilación nueva y pruebas físicas PENDIENTES.**
 
-- **Colas:** manga y anime ya no comparten `active_downloads`. Se separaron los almacenes, se agregó migración de entradas anteriores, y la restauración ya no vacía el almacén antes de completar. El worker espera a la restauración antes de iniciar.
-- **Paginación:** manga y anime avanzan por páginas intermedias vacías o duplicadas con un límite de seguridad de seis páginas. La deduplicación sigue basada en URL, no título.
-- **Browse:** las consultas individuales de los resultados dejan de coleccionarse permanentemente cuando no tienen suscriptores visibles. El rendimiento en fuentes reales, especialmente e-hentai, sigue pendiente de medir.
-- **Descargas/temperatura:** se corrigió el ciclo de espera de los workers, se evita reemplazar el worker activo y se impone un límite global de capítulos simultáneos; los videos activos bajaron a dos. El comportamiento térmico del teléfono aún requiere validación.
-- **Reindexado:** se añadió `Reindexar descargas` al menú de Biblioteca y se evita repetir el reindexado automático completo durante 12 horas después de terminar uno, salvo orden manual.
-- **Cierre al volver al inicio desde una extensión:** confirmado por el usuario en Android, pero la causa exacta no está aislada. Revisar logcat/CrashActivity al reproducirse; **no marcar como resuelto** por los cambios de concurrencia.
-- **Compilación:** GitHub Actions falló antes de ejecutar sus pasos en las ejecuciones observadas el 13/10. No se verificó la compilación ni se generó APK a partir de estos cambios. No asumir que el código compila hasta pasar CI/Gradle.
+## Reportado por pruebas reales antes de estos cambios
 
-- No hay teléfono, ADB, emulador ni microSD disponibles en el sandbox. SAF, retirada/reinserción y cambio A23 → M8 requieren validación física.
-- El índice portátil es un acelerador, no una autoridad. La autoridad es la existencia y fingerprint verificados por `StorageProvider`.
-- La UI de biblioteca todavía usa filtros maduros de Mihon/Animetail; `DownloadFilterEngine` ya está en Core, pero sus chips visuales Kiroha quedan pendientes.
-- El manifest por página/archivo del Download Manager no sustituye la persistencia de cola existente; la cola se restaura, pero la reanudación fina de una descarga parcial requiere integración adicional.
-- El Player y Reader aplican progreso remoto por ID local. Si un contenido no existe en el dispositivo receptor, el evento queda registrado sin crear contenido inexistente.
-- La prueba de servidor E2E debe ejecutarse directamente con `python3 kiroha-sync-server/test_e2e.py`; `unittest discover` no descubre ese archivo por su nombre actual.
-- Las advertencias Gradle/Kotlin existentes son deprecaciones y código heredado de Animetail/Mihon; no bloquean el build.
+- Desde Biblioteca → Inicio Android, la app quedaba abierta; desde una extensión/Browse → Inicio Android, el proceso podía cerrarse inesperadamente.
+- Tras el cierre, la cola de pendientes de manga/anime desaparecía; las descargas completadas sí sobrevivían.
+- Las páginas profundas de Browse/Search tardaban minutos, o parecían llegar al final sin agotar la fuente.
+- Al agregar muchas entradas a Biblioteca, las categorías y el diálogo se volvían lentos.
+- Descargas y navegación simultáneas causaban calor y consumo elevado en el teléfono.
+- La APK instalada aún mostraba el logotipo de Animetail. En ocasiones fue necesario desinstalarla para actualizar.
+
+## Modificaciones de código incorporadas a main
+
+- **Cola:** SharedPreferences separadas para manga/anime, recuperación sin vaciar almacenamiento, reordenamiento con escritura atómica, pausa persistida, workers esperando restauración y reanudación automática únicamente de trabajo no pausado; constraints de red y reintentos.
+- **Capítulos incompletos:** preservación de archivos `.tmp` y HTTP Range; reutilización de páginas completas sin pedir su URL otra vez; índice de archivos existentes por capítulo para eliminar recorridos O(n²) del directorio SAF.
+- **Rendimiento:** límite global de descargas de manga, menos peticiones de imágenes simultáneas, reducción por estado térmico del sistema; precarga Browse a ~12 entradas del final, suscripciones DB inactivas para tarjetas no visibles; caché observable de categorías y escritura secuencial antes de vincular trackers.
+- **Paginación:** manga/anime saltan páginas vacías y duplicadas dentro de un presupuesto finito; si la fuente no progresa, reportan error recuperable en vez de fin falso; URL canónica para identidad.
+- **Arranque:** reindexado automático diferido y limitado en frecuencia, omite reindexado concurrente a descargas; manejo de errores de indexado y registradores. Los cálculos de huella de los archivos descargados y su reindexado usan ahora el mismo algoritmo.
+- **UI:** acción «Reindexar descargas» en menús de Biblioteca de manga y anime; listas de categorías perezosas con IDs estables.
+- **Crash/branding:** fallos de copia mpv aislados; registros privados mínimos de actividad en DEBUG (tipo de Browse, momento de segundo plano, memoria utilizada), sin URLs/tokens; nuevos recursos vectoriales Kiroha para iconos adaptativos en Android moderno.
+- **Actualización:** versionCode 144. El `applicationId` sigue siendo `app.kiroha.mobile`; DEBUG usa `.dev`.
+
+## NO está demostrado / pendiente
+
+- **La causa exacta del cierre desde extensiones NO ha sido demostrada ni corregida con certeza.** Requiere logcat del teléfono y repetición con una APK compilada.
+- No hay build exitoso de la revisión actual. GitHub Actions falla antes de iniciar sus pasos (sin logs de Gradle); no existe APK actual validada.
+- No se ha comprobado recuperación real de 10, 100, 500 o 1000 pendientes, pausas, errores, microSD retirada, ni descarga de 97/100 páginas.
+- Solo está integrado el manejo heredado de páginas y reanudación por `.tmp`; faltan estados individuales y manifest persistente completo para toda cola.
+- Reindexar comprueba registros/índices conocidos, pero **no descubre de forma general todos los archivos no indexados de Tail/Mihon/Animetail**. La compatibilidad con carpetas y permisos reales requiere integración adicional.
+- No hay certificación térmica de dispositivo, comparaciones cronometradas con Tail, ni pruebas de scroll de 2000+ elementos ni 100 incorporaciones.
+- No hay prueba SyncSpace de 2+ dispositivos reales, retirada de microSD o validación completa de Player/Reader.
+- El icono vectorial de Android está integrado para los iconos adaptativos. Los PNG de compatibilidad antigua y la sustitución exacta del diseño elegido anteriormente siguen pendientes.
+- Las APK DEBUG generadas con claves diferentes pueden requerir desinstalar; `versionCode` mayor por sí solo no soluciona firmas distintas. Para actualizar sin perder datos, firmar con la **misma clave** que la instalación anterior.
+- Los filtros visuales completos de DownloadFilterEngine, copias de seguridad Kiroha, coordinador global, empaquetado release firmado y exportación de diagnósticos permanecen pendientes.
+
+**No etiquetar v0.1 FINAL ni presentar «PASÓ EN HARDWARE» hasta completar la compilación y las pruebas.**
