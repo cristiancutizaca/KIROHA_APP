@@ -38,10 +38,16 @@ class UniFileStorageProvider(
 
     override fun fingerprint(relativePath: String): FileFingerprint {
         val file = find(relativePath) ?: error("Storage file not found: $relativePath")
+        val size = file.sizeRecursively()
+        val modifiedAt = file.lastModified()
         val digest = MessageDigest.getInstance("SHA-256")
-        digest.update("${file.sizeRecursively()}:${file.lastModified()}".toByteArray())
+        digest.update("$size:$modifiedAt".toByteArray())
         visit(file, file.name.orEmpty(), digest)
-        return FileFingerprint(digest.digest().joinToString("") { "%02x".format(it) }, file.sizeRecursively(), file.lastModified().coerceAtLeast(0L))
+        return FileFingerprint(
+            digest.digest().joinToString("") { "%02x".format(it) },
+            size,
+            modifiedAt.coerceAtLeast(0L),
+        )
     }
 
     private fun visit(file: UniFile, prefix: String, digest: MessageDigest) {
