@@ -76,11 +76,16 @@ class AnimeDownloadStore(
     /**
      * Removes all the downloads from the store.
      */
-    fun clear() {
+    /** One atomic durable snapshot for queue reorder, without deleting migration metadata. */
+    @Synchronized
+    fun replaceAll(downloads: List<AnimeDownload>) {
         preferences.edit(commit = true) {
-            clear()
+            preferences.all.keys.filter { it.toLongOrNull() != null }.forEach { remove(it) }
+            downloads.forEach { putString(getKey(it), serialize(it)) }
         }
     }
+
+    fun clear() = replaceAll(emptyList())
 
     /**
      * Returns the preference's key for the given download.
