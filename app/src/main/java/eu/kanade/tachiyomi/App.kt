@@ -380,6 +380,23 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         val scope = ProcessLifecycleOwner.get().lifecycleScope
 
+        // Resume durable, unpaused queues once their on-disk records are loaded.
+        // This is scheduled off the UI thread and never wipes a queue after a crash.
+        if (packageName == getProcessName()) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    mangaDownloadManager.awaitQueueRestoration()
+                    animeDownloadManager.awaitQueueRestoration()
+                    if (mangaDownloadManager.hasAutoResumeWork()) mangaDownloadManager.startDownloads()
+                    if (animeDownloadManager.hasAutoResumeWork()) animeDownloadManager.startDownloads()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    logcat(LogPriority.ERROR, error) { "Kiroha background download recovery failed" }
+                }
+            }
+        }
+
         // Show notification to disable Incognito Mode when it's enabled
         basePreferences.incognitoMode.changes()
             .onEach { enabled ->
