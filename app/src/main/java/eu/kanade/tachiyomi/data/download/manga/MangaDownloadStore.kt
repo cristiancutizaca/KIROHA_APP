@@ -24,30 +24,34 @@ class MangaDownloadStore(
     private val getChapter: GetChapter,
 ) {
 
-    private val preferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
+    private val preferences = context.getSharedPreferences("active_manga_downloads", Context.MODE_PRIVATE)
+    // Older builds stored anime and manga in the same file and used overlapping numeric IDs.
+    // Read it for a one-time best-effort migration, but never clear it from either downloader.
+    private val legacyPreferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
+    private val legacyMigrationKey = "legacy_manga_queue_migrated"
 
     private var counter = 0
 
     fun addAll(downloads: List<MangaDownload>) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             downloads.forEach { putString(getKey(it), serialize(it)) }
         }
     }
 
     fun remove(download: MangaDownload) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             remove(getKey(download))
         }
     }
 
     fun removeAll(downloads: List<MangaDownload>) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             downloads.forEach { remove(getKey(it)) }
         }
     }
 
     fun clear() {
-        preferences.edit {
+        preferences.edit(commit = true) {
             clear()
         }
     }
@@ -57,26 +61,47 @@ class MangaDownloadStore(
     }
 
     suspend fun restore(): List<MangaDownload> {
-        val objs = preferences.all
-            .mapNotNull { it.value as? String }
-            .mapNotNull { deserialize(it) }
-            .sortedBy { it.order }
-
-        val downloads = mutableListOf<MangaDownload>()
-        if (objs.isNotEmpty()) {
-            val cachedManga = mutableMapOf<Long, Manga?>()
-            for ((mangaId, chapterId) in objs) {
-                val manga = cachedManga.getOrPut(mangaId) {
-                    getManga.await(mangaId)
-                } ?: continue
-                val source = sourceManager.get(manga.source) as? HttpSource ?: continue
-                val chapter = getChapter.await(chapterId) ?: continue
-                downloads.add(MangaDownload(source, manga, chapter))
-            }
+        // Never clear a persistent queue while restoring it. A crash between clear()
+        // and re-enqueue used to permanently lose all pending downloads.
+        val saved = preferences.all.values
+            .mapNotNull { it as? String }
+            .mapNotNull(::deserialize)
+        val migrating = !preferences.getBoolean(legacyMigrationKey, false)
+        val legacy = if (migrating) {
+            legacyPreferences.all.values
+                .mapNotNull { it as? String }
+                .mapNotNull(::deserialize)
+        } else {
+            emptyList()
         }
 
-        clear()
-        return downloads
+        val restored = mutableListOf<MangaDownload>()
+        val validLegacy = mutableListOf<DownloadObject>()
+        val cachedManga = mutableMapOf<Long, Manga?>()
+        for (obj in (saved + legacy).distinctBy { it.chapterId }.sortedBy { it.order }) {
+            val manga = cachedManga.getOrPut(obj.mangaId) {
+                getManga.await(obj.mangaId)
+            } ?: continue
+            val source = sourceManager.get(manga.source) as? HttpSource ?: continue
+            val chapter = getChapter.await(obj.chapterId) ?: continue
+            // Disambiguate legacy entries: chapter and episode IDs overlap.
+            if (chapter.mangaId != manga.id) continue
+            restored.add(MangaDownload(source, manga, chapter))
+            if (obj in legacy) validLegacy.add(obj)
+        }
+
+        if (migrating) {
+            preferences.edit(commit = true) {
+                validLegacy.forEach { obj ->
+                    val key = obj.chapterId.toString()
+                    if (!preferences.contains(key)) putString(key, json.encodeToString(obj))
+                }
+                putBoolean(legacyMigrationKey, true)
+            }
+        }
+        // Preserve queue ordering across process restarts and new additions.
+        counter = (saved + legacy).maxOfOrNull { it.order }?.plus(1) ?: 0
+        return restored
     }
 
     private fun serialize(download: MangaDownload): String {
