@@ -785,7 +785,15 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         if (kirohaStorageIndexJob?.isActive == true) return
         val device = DeviceRegistry(AndroidKeyValueStore(this)).load() ?: return
         kirohaStorageIndexJob = ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
-            val activeRoot = storageManager.getDownloadsDirectory()
+            try {
+                if (!force) {
+                    kotlinx.coroutines.delay(45_000L)
+                    // A background scan must not compete with a live download queue.
+                    if (mangaDownloadManager.queueState.value.isNotEmpty() ||
+                        animeDownloadManager.queueState.value.isNotEmpty()
+                    ) return@launch
+                }
+                val activeRoot = storageManager.getDownloadsDirectory()
             val providers = buildList {
                 activeRoot?.let { root ->
                     add(
@@ -815,7 +823,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     )
                 }
             }
-            preferences.edit().putLong("last_completed_at", System.currentTimeMillis()).apply()
+                preferences.edit().putLong("last_completed_at", System.currentTimeMillis()).apply()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                logcat(LogPriority.ERROR, error) { "Kiroha storage reindex failed; retry later" }
+            }
         }
     }
 
@@ -824,18 +837,32 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             launch {
                 mangaDownloadManager.statusFlow().collect { download ->
-                    persistKirohaMangaDownload(device.deviceId, download)
+                    try {
+                        persistKirohaMangaDownload(device.deviceId, download)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        logcat(LogPriority.ERROR, error) { "Kiroha manga download recorder failed" }
+                    }
                 }
             }
             launch {
                 animeDownloadManager.statusFlow().collect { download ->
-                    persistKirohaAnimeDownload(device.deviceId, download)
+                    try {
+                        persistKirohaAnimeDownload(device.deviceId, download)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        logcat(LogPriority.ERROR, error) { "Kiroha anime download recorder failed" }
+                    }
                 }
             }
         }
     }
 
     private suspend fun persistKirohaMangaDownload(deviceId: String, download: MangaDownload) {
+        // DownloadRecord describes a verified file, not transient queued work.
+        if (download.status != MangaDownload.State.DOWNLOADED) return
         val now = System.currentTimeMillis()
         val sourceNamespace = download.source.id.toString()
         val canonicalId = download.chapter.url
@@ -881,6 +908,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     private suspend fun persistKirohaAnimeDownload(deviceId: String, download: AnimeDownload) {
+        // DownloadRecord describes a verified file, not transient queued work.
+        if (download.status != AnimeDownload.State.DOWNLOADED) return
         val now = System.currentTimeMillis()
         val sourceNamespace = download.source.id.toString()
         val canonicalId = download.episode.url
