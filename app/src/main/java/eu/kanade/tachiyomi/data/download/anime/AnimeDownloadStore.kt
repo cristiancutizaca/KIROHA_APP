@@ -31,7 +31,9 @@ class AnimeDownloadStore(
     /**
      * Preference file where active downloads are stored.
      */
-    private val preferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
+    private val preferences = context.getSharedPreferences("active_anime_downloads", Context.MODE_PRIVATE)
+    private val legacyPreferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
+    private val legacyMigrationKey = "legacy_anime_queue_migrated"
 
     /**
      * Counter used to keep the queue order.
@@ -44,7 +46,7 @@ class AnimeDownloadStore(
      * @param downloads the list of downloads to add.
      */
     fun addAll(downloads: List<AnimeDownload>) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             downloads.forEach { putString(getKey(it), serialize(it)) }
         }
     }
@@ -55,7 +57,7 @@ class AnimeDownloadStore(
      * @param download the download to remove.
      */
     fun remove(download: AnimeDownload) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             remove(getKey(download))
         }
     }
@@ -66,7 +68,7 @@ class AnimeDownloadStore(
      * @param downloads the download to remove.
      */
     fun removeAll(downloads: List<AnimeDownload>) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             downloads.forEach { remove(getKey(it)) }
         }
     }
@@ -75,7 +77,7 @@ class AnimeDownloadStore(
      * Removes all the downloads from the store.
      */
     fun clear() {
-        preferences.edit {
+        preferences.edit(commit = true) {
             clear()
         }
     }
@@ -93,27 +95,45 @@ class AnimeDownloadStore(
      * Returns the list of downloads to restore. It should be called in a background thread.
      */
     fun restore(): List<AnimeDownload> {
-        val objs = preferences.all
-            .mapNotNull { it.value as? String }
-            .mapNotNull { deserialize(it) }
-            .sortedBy { it.order }
-
-        val downloads = mutableListOf<AnimeDownload>()
-        if (objs.isNotEmpty()) {
-            val cachedAnime = mutableMapOf<Long, Anime?>()
-            for ((animeId, episodeId) in objs) {
-                val anime = cachedAnime.getOrPut(animeId) {
-                    runBlocking { getAnime.await(animeId) }
-                } ?: continue
-                val source = sourceManager.get(anime.source) as? AnimeHttpSource ?: continue
-                val episode = runBlocking { getEpisode.await(episodeId) } ?: continue
-                downloads.add(AnimeDownload(source, anime, episode))
-            }
+        // Keep entries on disk throughout restore. The previous clear() introduced
+        // a window where a killed process lost every pending download.
+        val saved = preferences.all.values
+            .mapNotNull { it as? String }
+            .mapNotNull(::deserialize)
+        val migrating = !preferences.getBoolean(legacyMigrationKey, false)
+        val legacy = if (migrating) {
+            legacyPreferences.all.values
+                .mapNotNull { it as? String }
+                .mapNotNull(::deserialize)
+        } else {
+            emptyList()
         }
 
-        // Clear the store, downloads will be added again immediately.
-        clear()
-        return downloads
+        val restored = mutableListOf<AnimeDownload>()
+        val validLegacy = mutableListOf<AnimeDownloadObject>()
+        val cachedAnime = mutableMapOf<Long, Anime?>()
+        for (obj in (saved + legacy).distinctBy { it.episodeId }.sortedBy { it.order }) {
+            val anime = cachedAnime.getOrPut(obj.animeId) {
+                runBlocking { getAnime.await(obj.animeId) }
+            } ?: continue
+            val source = sourceManager.get(anime.source) as? AnimeHttpSource ?: continue
+            val episode = runBlocking { getEpisode.await(obj.episodeId) } ?: continue
+            if (episode.animeId != anime.id) continue
+            restored.add(AnimeDownload(source, anime, episode))
+            if (obj in legacy) validLegacy.add(obj)
+        }
+
+        if (migrating) {
+            preferences.edit(commit = true) {
+                validLegacy.forEach { obj ->
+                    val key = obj.episodeId.toString()
+                    if (!preferences.contains(key)) putString(key, json.encodeToString(obj))
+                }
+                putBoolean(legacyMigrationKey, true)
+            }
+        }
+        counter = (saved + legacy).maxOfOrNull { it.order }?.plus(1) ?: 0
+        return restored
     }
 
     /**
