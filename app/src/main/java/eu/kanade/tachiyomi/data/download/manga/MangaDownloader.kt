@@ -395,11 +395,9 @@ class MangaDownloader(
                 DataSaver.NoOp
             }
 
-            // Delete all temporary (unfinished) files
-            tmpDir.listFiles()
-                ?.filter { it.name?.endsWith(".tmp") == true }
-                ?.forEach { it.delete() }
-
+            // Preserve partial .tmp page files across process death. downloadImage()
+            // already requests the existing byte offset and overwrites from zero
+            // if the server does not support HTTP 206 range responses.
             download.status = MangaDownload.State.DOWNLOADING
 
             // Snapshot existing completed pages ONCE per chapter. The previous
