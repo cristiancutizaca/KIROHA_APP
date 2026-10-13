@@ -196,6 +196,9 @@ data object MangaLibraryTab : Tab {
                             context.toast(TLMR.strings.sync_in_progress)
                         }
                     },
+                    onClickReindexDownloads = {
+                        (context.applicationContext as? eu.kanade.tachiyomi.App)?.requestKirohaDownloadReindex()
+                    },
                     searchQuery = state.searchQuery,
                     onSearchQueryChange = viewModel::search,
                     scrollBehavior = scrollBehavior.takeIf { !tabVisible }, // For scroll overlay when no tab
