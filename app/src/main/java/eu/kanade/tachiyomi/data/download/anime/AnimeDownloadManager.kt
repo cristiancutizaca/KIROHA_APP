@@ -68,6 +68,7 @@ class AnimeDownloadManager(
 
     // For use by DownloadService only
     suspend fun awaitQueueRestoration() = downloader.awaitRestoration()
+    fun hasAutoResumeWork() = downloader.hasAutoResumeWork()
 
     fun downloaderStart() = downloader.start()
     fun downloaderStop(reason: String? = null) = downloader.stop(reason)
