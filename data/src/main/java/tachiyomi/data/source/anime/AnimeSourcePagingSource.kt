@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.domain.items.episode.model.NoEpisodesException
 import tachiyomi.domain.source.anime.repository.AnimeSourcePagingSourceType
 import kiroha.core.PageDeduplicator
 
@@ -41,24 +40,32 @@ abstract class AnimeSourcePagingSource(
     abstract suspend fun requestNextPage(currentPage: Int): AnimesPage
 
     override suspend fun load(params: LoadParams<Long>): LoadResult<Long, SAnime> {
-        val page = params.key ?: 1
-
-        val animesPage = try {
-            withIOContext {
-                requestNextPage(page.toInt())
-                    .takeIf { it.animes.isNotEmpty() }
-                    ?: throw NoEpisodesException()
+        var page = params.key ?: 1
+        // Some extensions yield empty or entirely repeated intermediate pages.
+        // Walk forward within one Paging load so Paging does not stall on an empty append.
+        repeat(MAX_SKIPPED_PAGES_PER_LOAD) {
+            val animesPage = try {
+                withIOContext { requestNextPage(page.toInt()) }
+            } catch (e: Exception) {
+                return LoadResult.Error(e)
             }
-        } catch (e: Exception) {
-            return LoadResult.Error(e)
+            val result = pageDeduplicator.accept(animesPage.animes, animesPage.hasNextPage)
+            if (result.items.isNotEmpty() || !result.hasNext) {
+                return LoadResult.Page(
+                    data = result.items,
+                    prevKey = null,
+                    nextKey = if (result.hasNext) page + 1 else null,
+                )
+            }
+            page++
         }
+        // The deduplicator's bounded loop guard avoids requesting infinite
+        // copies from broken extensions. Do not spin forever on empty pages.
+        return LoadResult.Page(data = emptyList(), prevKey = null, nextKey = null)
+    }
 
-        val result = pageDeduplicator.accept(animesPage.animes, animesPage.hasNextPage)
-        return LoadResult.Page(
-            data = result.items,
-            prevKey = null,
-            nextKey = if (result.hasNext) page + 1 else null,
-        )
+    private companion object {
+        const val MAX_SKIPPED_PAGES_PER_LOAD = 6
     }
 
     override fun getRefreshKey(state: PagingState<Long, SAnime>): Long? {
