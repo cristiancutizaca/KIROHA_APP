@@ -126,7 +126,14 @@ class MangaDownloader(
 
     // The worker must wait for on-disk queue restoration before deciding it is empty.
     private val restorationJob: Job = scope.launch {
-        addAllToQueue(store.restore())
+        val restored = store.restore()
+        restored.forEach { it.status = MangaDownload.State.QUEUE }
+        // These items are already durable; do not rewrite 1,000 preference entries
+        // merely because the UI process was recreated.
+        _queueState.update { current ->
+            val present = current.mapTo(hashSetOf()) { it.chapter.id }
+            restored.filter { present.add(it.chapter.id) } + current
+        }
     }
 
     suspend fun awaitRestoration() {
@@ -722,39 +729,37 @@ class MangaDownloader(
 
     private fun addAllToQueue(downloads: List<MangaDownload>) {
         if (downloads.isEmpty()) return
+        val existing = queueState.value.mapTo(hashSetOf()) { it.chapter.id }
+        val newDownloads = downloads.filter { existing.add(it.chapter.id) }
+        if (newDownloads.isEmpty()) return
+        newDownloads.forEach { it.status = MangaDownload.State.QUEUE }
+        // Persist first. Do not perform disk writes inside StateFlow.update's CAS retry.
+        store.addAll(newDownloads)
         _queueState.update { current ->
-            val existingIds = current.mapTo(hashSetOf()) { it.chapter.id }
-            val newDownloads = downloads.filter { existingIds.add(it.chapter.id) }
-            newDownloads.forEach { it.status = MangaDownload.State.QUEUE }
-            // Persist before publishing new queue state. Never replace the saved queue on restore.
-            store.addAll(newDownloads)
-            current + newDownloads
+            val present = current.mapTo(hashSetOf()) { it.chapter.id }
+            current + newDownloads.filter { present.add(it.chapter.id) }
         }
     }
 
     private fun removeFromQueue(download: MangaDownload) {
-        _queueState.update {
-            store.remove(download)
-            if (download.status == MangaDownload.State.DOWNLOADING || download.status == MangaDownload.State.QUEUE) {
-                download.status = MangaDownload.State.NOT_DOWNLOADED
-            }
-            it - download
-        }
+        store.remove(download)
+        if (download.status == MangaDownload.State.DOWNLOADING ||
+            download.status == MangaDownload.State.QUEUE
+        ) download.status = MangaDownload.State.NOT_DOWNLOADED
+        _queueState.update { current -> current - download }
     }
 
     private inline fun removeFromQueueIf(predicate: (MangaDownload) -> Boolean) {
-        _queueState.update { queue ->
-            val downloads = queue.filter { predicate(it) }
-            store.removeAll(downloads)
-            downloads.forEach { download ->
-                if (download.status == MangaDownload.State.DOWNLOADING ||
-                    download.status == MangaDownload.State.QUEUE
-                ) {
-                    download.status = MangaDownload.State.NOT_DOWNLOADED
-                }
-            }
-            queue - downloads
+        val downloads = queueState.value.filter(predicate)
+        if (downloads.isEmpty()) return
+        store.removeAll(downloads)
+        downloads.forEach { download ->
+            if (download.status == MangaDownload.State.DOWNLOADING ||
+                download.status == MangaDownload.State.QUEUE
+            ) download.status = MangaDownload.State.NOT_DOWNLOADED
         }
+        val removed = downloads.toSet()
+        _queueState.update { current -> current.filterNot { it in removed } }
     }
 
     fun removeFromQueue(chapters: List<Chapter>) {
@@ -767,17 +772,14 @@ class MangaDownloader(
     }
 
     private fun internalClearQueue() {
-        _queueState.update {
-            it.forEach { download ->
-                if (download.status == MangaDownload.State.DOWNLOADING ||
-                    download.status == MangaDownload.State.QUEUE
-                ) {
-                    download.status = MangaDownload.State.NOT_DOWNLOADED
-                }
-            }
-            store.clear()
-            emptyList()
+        store.clear()
+        val previous = _queueState.value
+        previous.forEach { download ->
+            if (download.status == MangaDownload.State.DOWNLOADING ||
+                download.status == MangaDownload.State.QUEUE
+            ) download.status = MangaDownload.State.NOT_DOWNLOADED
         }
+        _queueState.value = emptyList()
     }
 
     fun updateQueue(downloads: List<MangaDownload>) {
