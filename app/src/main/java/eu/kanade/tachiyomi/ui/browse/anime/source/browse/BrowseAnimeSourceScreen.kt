@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.ui.browse.anime.source.browse
 
 import android.content.Context
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +52,7 @@ import eu.kanade.presentation.entries.anime.DuplicateAnimeDialog
 import eu.kanade.presentation.util.AssistContentScreen
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
+import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.core.common.Constants
 import eu.kanade.tachiyomi.ui.browse.anime.extension.details.AnimeSourcePreferencesScreen
 import eu.kanade.tachiyomi.ui.browse.anime.migration.anime.season.MigrateSeasonSelectScreen
