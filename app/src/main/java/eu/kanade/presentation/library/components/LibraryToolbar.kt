@@ -42,6 +42,7 @@ fun LibraryToolbar(
     onSearchQueryChange: (String?) -> Unit,
     scrollBehavior: TopAppBarScrollBehavior?,
     navigateUp: (() -> Unit)? = null,
+    onClickReindexDownloads: (() -> Unit)? = null,
 ) = when {
     selectedCount > 0 -> LibrarySelectionToolbar(
         selectedCount = selectedCount,
@@ -60,6 +61,7 @@ fun LibraryToolbar(
         onClickGlobalUpdate = onClickGlobalUpdate,
         onClickOpenRandomEntry = onClickOpenRandomEntry,
         onClickSyncNow = onClickSyncNow,
+        onClickReindexDownloads = onClickReindexDownloads,
         scrollBehavior = scrollBehavior,
         navigateUp = navigateUp,
     )
@@ -76,6 +78,7 @@ private fun LibraryRegularToolbar(
     onClickGlobalUpdate: () -> Unit,
     onClickOpenRandomEntry: () -> Unit,
     onClickSyncNow: () -> Unit,
+    onClickReindexDownloads: (() -> Unit)?,
     scrollBehavior: TopAppBarScrollBehavior?,
     navigateUp: (() -> Unit)?,
 ) {
@@ -126,6 +129,13 @@ private fun LibraryRegularToolbar(
                         title = stringResource(TLMR.strings.sync_library),
                         onClick = onClickSyncNow,
                     ),
+                ) + listOfNotNull(
+                    onClickReindexDownloads?.let {
+                        AppBar.OverflowAction(
+                            title = "Reindexar descargas",
+                            onClick = it,
+                        )
+                    },
                 ),
             )
         },
