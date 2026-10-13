@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.ui.browse.anime.source.browse
 
+import android.content.Context
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -105,6 +108,15 @@ data class BrowseAnimeSourceScreen(
                 )
             }
         val state by viewModel.state.collectAsState()
+        // Privacy-safe DEBUG breadcrumb for investigating background process death.
+        val breadcrumbContext = LocalContext.current
+        if (BuildConfig.DEBUG) {
+            DisposableEffect(breadcrumbContext) {
+                val prefs = breadcrumbContext.getSharedPreferences("kiroha_debug_lifecycle", Context.MODE_PRIVATE)
+                prefs.edit().putString("screen", "browse_anime").apply()
+                onDispose { prefs.edit().putString("screen", "other").apply() }
+            }
+        }
 
         val navigator = LocalNavigator.currentOrThrow
         val navigateUp: () -> Unit = {
