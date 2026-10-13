@@ -102,14 +102,26 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun `pagination stops after two duplicate-only pages`() {
+    fun `pagination passes intermediate duplicate-only pages and eventually finds new items`() {
         val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
         deduplicator.accept(listOf("A", "B"), true)
-        val duplicatePage = deduplicator.accept(listOf("A", "B"), true)
-        val loopPage = deduplicator.accept(listOf("A", "B"), true)
-        assertTrue(duplicatePage.hasNext)
-        assertFalse(loopPage.hasNext)
-        assertEquals(2, loopPage.duplicatesRemoved)
+        assertTrue(deduplicator.accept(listOf("A", "B"), true).hasNext)
+        assertTrue(deduplicator.accept(emptyList(), true).hasNext)
+        val newPage = deduplicator.accept(listOf("C", "D"), true)
+        assertEquals(listOf("C", "D"), newPage.items)
+        assertTrue(newPage.hasNext)
+    }
+
+    @Test
+    fun `pagination stops after six consecutive duplicate-only pages`() {
+        val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
+        deduplicator.accept(listOf("A", "B"), true)
+        repeat(5) {
+            assertTrue(deduplicator.accept(listOf("A", "B"), true).hasNext)
+        }
+        val lastDuplicate = deduplicator.accept(listOf("A", "B"), true)
+        assertFalse(lastDuplicate.hasNext)
+        assertEquals(2, lastDuplicate.duplicatesRemoved)
     }
 
     @Test
