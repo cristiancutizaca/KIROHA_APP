@@ -124,14 +124,18 @@ class BrowseMangaSourceViewModel(
     val mangaPagerFlowFlow = state.map { it.listing }
         .distinctUntilChanged()
         .map { listing ->
-            Pager(PagingConfig(pageSize = 25)) {
+            Pager(PagingConfig(pageSize = 25, prefetchDistance = 12, initialLoadSize = 25)) {
                 getRemoteManga.subscribe(sourceId, listing.query ?: "", listing.filters)
             }.flow.map { pagingData ->
                 pagingData.map {
                     networkToLocalManga.await(it.toDomainManga(sourceId))
-                        .let { localManga -> getManga.subscribe(localManga.url, localManga.source) }
-                        .filterNotNull()
-                        .stateIn(viewModelScope)
+                        .let { localManga ->
+                            getManga.subscribe(localManga.url, localManga.source)
+                                .filterNotNull()
+                                // A permanent eager subscription for every paged item makes deep
+                                // browsing progressively slower. Observe only visible consumers.
+                                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), localManga)
+                        }
                 }
                     .filter { !hideInLibraryItems || !it.value.favorite }
             }
