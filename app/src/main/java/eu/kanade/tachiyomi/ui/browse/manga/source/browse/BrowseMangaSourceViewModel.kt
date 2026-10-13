@@ -129,9 +129,12 @@ class BrowseMangaSourceViewModel(
             }.flow.map { pagingData ->
                 pagingData.map {
                     networkToLocalManga.await(it.toDomainManga(sourceId))
-                        .let { localManga -> getManga.subscribe(localManga.url, localManga.source) }
-                        .filterNotNull()
-                        .stateIn(viewModelScope)
+                        .let { localManga ->
+                            getManga.subscribe(localManga.url, localManga.source)
+                                .filterNotNull()
+                                // Do not permanently collect a StateFlow for every browsed item.
+                                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), localManga)
+                        }
                 }
                     .filter { !hideInLibraryItems || !it.value.favorite }
             }
