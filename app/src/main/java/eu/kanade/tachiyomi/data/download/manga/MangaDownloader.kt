@@ -1,6 +1,8 @@
 package eu.kanade.tachiyomi.data.download.manga
 
 import android.content.Context
+import android.os.Build
+import android.os.PowerManager
 import aniyomi.util.DataSaver
 import aniyomi.util.DataSaver.Companion.getImage
 import com.hippo.unifile.UniFile
@@ -222,7 +224,7 @@ class MangaDownloader(
                         // The previous per-source limit multiplied by five sources, causing
                         // up to 25 simultaneous chapter jobs (each fetching multiple pages).
                         // Enforce one global cap to reduce CPU, network and thermal load.
-                        .take(downloadPreferences.numberOfDownloads.get().coerceIn(1, 5))
+                        .take(minOf(downloadPreferences.numberOfDownloads.get().coerceIn(1, 5), thermalChapterLimit()))
                     emit(activeDownloads)
 
                     if (activeDownloads.isEmpty()) break
@@ -394,9 +396,10 @@ class MangaDownloader(
             download.status = MangaDownload.State.DOWNLOADING
 
             // Start downloading images, consider we can have downloaded images already
-            // Concurrently do 4 pages at a time
+            // A few chapters can fetch many pages concurrently; throttle per chapter
+            // when the OS reports a hot device instead of multiplying socket load.
             pageList.asFlow()
-                .flatMapMerge(concurrency = 4) { page ->
+                .flatMapMerge(concurrency = if (thermalChapterLimit() == 1) 1 else 2) { page ->
                     flow {
                         // Fetch image URL if necessary
                         if (page.imageUrl.isNullOrEmpty()) {
@@ -794,6 +797,16 @@ class MangaDownloader(
 
         if (wasRunning) {
             start()
+        }
+    }
+
+    private fun thermalChapterLimit(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 5
+        val powerManager = context.getSystemService(PowerManager::class.java) ?: return 5
+        return when {
+            powerManager.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE -> 1
+            powerManager.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> 2
+            else -> 5
         }
     }
 
