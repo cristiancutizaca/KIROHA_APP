@@ -50,11 +50,16 @@ class MangaDownloadStore(
         }
     }
 
-    fun clear() {
+    /** One atomic durable snapshot for queue reorder, without deleting migration metadata. */
+    @Synchronized
+    fun replaceAll(downloads: List<MangaDownload>) {
         preferences.edit(commit = true) {
-            clear()
+            preferences.all.keys.filter { it.toLongOrNull() != null }.forEach { remove(it) }
+            downloads.forEach { putString(getKey(it), serialize(it)) }
         }
     }
+
+    fun clear() = replaceAll(emptyList())
 
     private fun getKey(download: MangaDownload): String {
         return download.chapter.id.toString()
