@@ -385,9 +385,18 @@ class BrowseAnimeSourceViewModel(
             new = new.removeBackgrounds(backgroundCache)
         } else {
             setAnimeDefaultEpisodeFlags.await(anime)
-            addTracks.bindEnhancedTrackers(anime, source)
         }
+        // Persist library membership before optional tracker/network integration.
         updateAnime.await(new.toAnimeUpdate())
+        if (new.favorite) {
+            try {
+                addTracks.bindEnhancedTrackers(anime, source)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w("KirohaFavorites", "Optional tracker binding failed", error)
+            }
+        }
     }
 
     fun changeAnimeFavorite(anime: Anime) {
