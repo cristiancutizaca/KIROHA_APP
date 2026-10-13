@@ -115,11 +115,13 @@ class AnimeDownloader(
     val isRunning: Boolean
         get() = downloaderJob?.isActive ?: false
 
-    init {
-        scope.launch {
-            val episodes = async { store.restore() }
-            addAllToQueue(episodes.await())
-        }
+    // The worker must wait for on-disk queue restoration before deciding it is empty.
+    private val restorationJob: Job = scope.launch {
+        addAllToQueue(store.restore())
+    }
+
+    suspend fun awaitRestoration() {
+        restorationJob.join()
     }
 
     /**
@@ -879,12 +881,14 @@ class AnimeDownloader(
     }
 
     private fun addAllToQueue(downloads: List<AnimeDownload>) {
-        _queueState.update {
-            downloads.forEach { download ->
-                download.status = AnimeDownload.State.QUEUE
-            }
-            store.addAll(downloads)
-            it + downloads
+        if (downloads.isEmpty()) return
+        _queueState.update { current ->
+            val existingIds = current.mapTo(hashSetOf()) { it.episode.id }
+            val newDownloads = downloads.filter { existingIds.add(it.episode.id) }
+            newDownloads.forEach { it.status = AnimeDownload.State.QUEUE }
+            // Persist before publishing new queue state. Never replace the saved queue on restore.
+            store.addAll(newDownloads)
+            current + newDownloads
         }
     }
 
