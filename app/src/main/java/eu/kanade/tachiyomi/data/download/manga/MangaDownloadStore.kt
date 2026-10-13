@@ -29,6 +29,13 @@ class MangaDownloadStore(
     // Read it for a one-time best-effort migration, but never clear it from either downloader.
     private val legacyPreferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
     private val legacyMigrationKey = "legacy_manga_queue_migrated"
+    private val pausedKey = "manga_queue_paused"
+
+    fun isPaused(): Boolean = preferences.getBoolean(pausedKey, false)
+
+    fun setPaused(paused: Boolean) {
+        preferences.edit(commit = true) { putBoolean(pausedKey, paused) }
+    }
 
     private var counter = 0
 
