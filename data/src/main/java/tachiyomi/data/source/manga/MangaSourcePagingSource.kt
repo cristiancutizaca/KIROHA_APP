@@ -1,7 +1,7 @@
 package tachiyomi.data.source.manga
 
-import androidx.paging.PagingState
 import android.util.Log
+import androidx.paging.PagingState
 import kotlinx.coroutines.CancellationException
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
