@@ -1,0 +1,31 @@
+package tachiyomi.domain.items.chapter.interactor
+
+import dev.zacsweers.metro.Inject
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.items.chapter.model.Chapter
+import tachiyomi.domain.items.chapter.repository.ChapterRepository
+
+@Inject
+class GetChapter(
+    private val chapterRepository: ChapterRepository,
+) {
+
+    suspend fun await(id: Long): Chapter? {
+        return try {
+            chapterRepository.getChapterById(id)
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            null
+        }
+    }
+
+    suspend fun await(url: String, mangaId: Long): Chapter? {
+        return try {
+            chapterRepository.getChapterByUrlAndMangaId(url, mangaId)
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            null
+        }
+    }
+}

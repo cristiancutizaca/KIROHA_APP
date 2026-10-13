@@ -1,0 +1,662 @@
+package eu.kanade.tachiyomi.data.track.shikimori
+
+import android.net.Uri
+import androidx.core.net.toUri
+import eu.kanade.tachiyomi.data.database.models.anime.AnimeTrack
+import eu.kanade.tachiyomi.data.database.models.manga.MangaTrack
+import eu.kanade.tachiyomi.data.track.model.AnimeTrackSearch
+import eu.kanade.tachiyomi.data.track.model.MangaTrackSearch
+import eu.kanade.tachiyomi.data.track.model.TrackAnimeMetadata
+import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMAnimeSearchResult
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMAnimeUserListResult
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMLibraryIdResponse
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMMetadata
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMOAuth
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMSearchResult
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMUser
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMUserListResult
+import eu.kanade.tachiyomi.data.track.shikimori.dto.SMUserResult
+import eu.kanade.tachiyomi.network.DELETE
+import eu.kanade.tachiyomi.network.POST
+import eu.kanade.tachiyomi.network.PUT
+import eu.kanade.tachiyomi.network.awaitSuccess
+import eu.kanade.tachiyomi.network.jsonMime
+import eu.kanade.tachiyomi.network.parseAs
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
+import tachiyomi.core.common.util.lang.withIOContext
+import uy.kohesive.injekt.injectLazy
+import tachiyomi.domain.track.anime.model.AnimeTrack as DomainAnimeTrack
+import tachiyomi.domain.track.manga.model.MangaTrack as DomainMangaTrack
+
+class ShikimoriApi(
+    private val trackId: Long,
+    private val client: OkHttpClient,
+    interceptor: ShikimoriInterceptor,
+) {
+
+    private val json: Json by injectLazy()
+
+    private val authClient = client.newBuilder().addInterceptor(interceptor).build()
+
+    suspend fun addLibManga(track: MangaTrack, userId: String): MangaTrack {
+        return withIOContext {
+            with(json) {
+                val payload = buildJsonObject {
+                    putJsonObject("user_rate") {
+                        put("user_id", userId)
+                        put("target_id", track.remote_id)
+                        put("target_type", "Manga")
+                        put("chapters", track.last_chapter_read.toInt())
+                        put("score", track.score.toInt())
+                        put("status", track.toShikimoriStatus())
+                    }
+                }
+                authClient.newCall(
+                    POST(
+                        "$API_URL/v2/user_rates",
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                ).awaitSuccess()
+                    .parseAs<SMLibraryIdResponse>()
+                    .let {
+                        track.library_id = it.id
+                    }
+                track
+            }
+        }
+    }
+
+    suspend fun updateLibManga(track: MangaTrack): MangaTrack {
+        return withIOContext {
+            val payload = buildJsonObject {
+                putJsonObject("user_rate") {
+                    put("chapters", track.last_chapter_read.toInt())
+                    put("score", track.score.toInt())
+                    put("status", track.toShikimoriStatus())
+                }
+            }
+
+            with(json) {
+                authClient.newCall(
+                    PUT(
+                        "$API_URL/v2/user_rates/${track.library_id}",
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMLibraryIdResponse>()
+                    .let {
+                        track.library_id = it.id
+                    }
+                track
+            }
+        }
+    }
+
+    suspend fun deleteLibManga(track: DomainMangaTrack) {
+        withIOContext {
+            authClient
+                .newCall(DELETE("$API_URL/v2/user_rates/${track.libraryId}"))
+                .awaitSuccess()
+        }
+    }
+
+    suspend fun addLibAnime(track: AnimeTrack, userId: String): AnimeTrack {
+        return withIOContext {
+            with(json) {
+                val payload = buildJsonObject {
+                    putJsonObject("user_rate") {
+                        put("user_id", userId)
+                        put("target_id", track.remote_id)
+                        put("target_type", "Anime")
+                        put("episodes", track.last_episode_seen.toInt())
+                        put("score", track.score.toInt())
+                        put("status", track.toShikimoriStatus())
+                    }
+                }
+                authClient.newCall(
+                    POST(
+                        "$API_URL/v2/user_rates",
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                ).awaitSuccess()
+                    .parseAs<SMLibraryIdResponse>()
+                    .let {
+                        track.library_id = it.id
+                    }
+                track
+            }
+        }
+    }
+
+    suspend fun updateLibAnime(track: AnimeTrack): AnimeTrack {
+        return withIOContext {
+            val payload = buildJsonObject {
+                putJsonObject("user_rate") {
+                    put("episodes", track.last_episode_seen.toInt())
+                    put("score", track.score.toInt())
+                    put("status", track.toShikimoriStatus())
+                }
+            }
+
+            with(json) {
+                authClient.newCall(
+                    PUT(
+                        "$API_URL/v2/user_rates/${track.library_id}",
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMLibraryIdResponse>()
+                    .let {
+                        track.library_id = it.id
+                    }
+                track
+            }
+        }
+    }
+
+    suspend fun deleteLibAnime(track: DomainAnimeTrack) {
+        withIOContext {
+            authClient
+                .newCall(DELETE("$API_URL/v2/user_rates/${track.libraryId}"))
+                .awaitSuccess()
+        }
+    }
+
+    suspend fun search(search: String): List<MangaTrackSearch> {
+        return withIOContext {
+            val query = $$"""
+            |query($query: String) {
+                |mangas(search: $query, limit: 20, kind:"!light_novel,!novel") {
+                    |id
+                    |name
+                    |chapters
+                    |kind
+                    |poster {
+                        |mainUrl
+                    |}
+                    |score
+                    |url
+                    |status
+                    |airedOn {
+                        |date
+                    |}
+                    |description
+                    |personRoles {
+                        |person {
+                            |name
+                        |}
+                        |rolesEn
+                    |}
+                |}
+            |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("query", search)
+                }
+            }
+            with(json) {
+                authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMSearchResult>()
+                    .data.mangas
+                    .map { it.toTrack(trackId) }
+            }
+        }
+    }
+
+    suspend fun getMangaDetails(id: Int): MangaTrackSearch? {
+        return withIOContext {
+            val query = $$"""
+            |query($query: String) {
+                |mangas(ids: $query, limit: 1, kind:"!light_novel,!novel") {
+                    |id
+                    |name
+                    |chapters
+                    |kind
+                    |poster {
+                        |mainUrl
+                    |}
+                    |score
+                    |url
+                    |status
+                    |airedOn {
+                        |date
+                    |}
+                    |description
+                    |personRoles {
+                        |person {
+                            |name
+                        |}
+                        |rolesEn
+                    |}
+                |}
+            |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("query", "$id")
+                }
+            }
+
+            with(json) {
+                authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMSearchResult>()
+                    .data.mangas
+                    .firstOrNull()
+                    ?.toTrack(trackId)
+            }
+        }
+    }
+
+    suspend fun searchAnime(search: String): List<AnimeTrackSearch> {
+        return withIOContext {
+            val query = $$"""
+            |query($query: String) {
+                |animes(search: $query, limit: 20) {
+                    |id
+                    |name
+                    |episodes
+                    |kind
+                    |poster {
+                        |mainUrl
+                    |}
+                    |score
+                    |url
+                    |status
+                    |airedOn {
+                        |date
+                    |}
+                    |description
+                    |personRoles {
+                        |person {
+                            |name
+                        |}
+                        |rolesEn
+                    |}
+                |}
+            |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("query", search)
+                }
+            }
+            with(json) {
+                authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMAnimeSearchResult>()
+                    .data.animes
+                    .map { it.toTrack(trackId) }
+            }
+        }
+    }
+
+    suspend fun getAnimeDetails(id: Int): AnimeTrackSearch? {
+        return withIOContext {
+            val query = $$"""
+            |query($query: String) {
+                |animes(ids: $query, limit: 1) {
+                    |id
+                    |name
+                    |episodes
+                    |kind
+                    |poster {
+                        |mainUrl
+                    |}
+                    |score
+                    |url
+                    |status
+                    |airedOn {
+                        |date
+                    |}
+                    |description
+                    |personRoles {
+                        |person {
+                            |name
+                        |}
+                        |rolesEn
+                    |}
+                |}
+            |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("query", "$id")
+                }
+            }
+
+            with(json) {
+                authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMAnimeSearchResult>()
+                    .data.animes
+                    .firstOrNull()
+                    ?.toTrack(trackId)
+            }
+        }
+    }
+
+    suspend fun findLibManga(track: MangaTrack): MangaTrack? {
+        return withIOContext {
+            val query = $$"""
+                |query($id: String) {
+                    |mangas(ids: $id, limit: 1) {
+                        |id
+                        |url
+                        |name
+                        |chapters
+                        |userRate {
+                            |id
+                            |chapters
+                            |status
+                            |score
+                        |}
+                    |}
+                |}
+            """.trimMargin()
+
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("id", track.remote_id.toString())
+                }
+            }
+            with(json) {
+                val listResult = authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMUserListResult>()
+                    .data.mangas
+                    .firstOrNull()
+
+                // Shikimori has no user list query that allows query by ID, so we go via the "mangas" query & include
+                // userRate data which will be null if the title is not in the user's list.
+                // If it was removed on Shikimori and is still linked in the app, notify user via returning null here
+                // which throws an exception at the Shikimori.refresh call
+                if (listResult?.userRate == null) {
+                    null
+                } else {
+                    listResult.toTrack(trackId)
+                }
+            }
+        }
+    }
+
+    suspend fun findLibAnime(track: AnimeTrack): AnimeTrack? {
+        return withIOContext {
+            val query = $$"""
+                |query($id: String) {
+                    |animes(ids: $id, limit: 1) {
+                        |id
+                        |url
+                        |name
+                        |episodes
+                        |userRate {
+                            |id
+                            |episodes
+                            |status
+                            |score
+                        |}
+                    |}
+                |}
+            """.trimMargin()
+
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("id", track.remote_id.toString())
+                }
+            }
+            with(json) {
+                val listResult = authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMAnimeUserListResult>()
+                    .data.animes
+                    .firstOrNull()
+
+                if (listResult?.userRate == null) {
+                    null
+                } else {
+                    listResult.toTrack(trackId)
+                }
+            }
+        }
+    }
+
+    suspend fun getCurrentUser(): SMUser {
+        return with(json) {
+            val query = """
+            |{
+                |currentUser {
+                    |id
+                    |nickname
+                |}
+            |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+            }
+            authClient.newCall(
+                POST(
+                    GRAPHQL_API_URL,
+                    body = payload.toString().toRequestBody(jsonMime),
+                ),
+            )
+                .awaitSuccess()
+                .parseAs<SMUserResult>()
+                .data.currentUser
+        }
+    }
+
+    suspend fun getMangaMetadata(track: DomainMangaTrack): TrackMangaMetadata {
+        return withIOContext {
+            val query = """
+                |query(${'$'}ids: String!) {
+                    |mangas(ids: ${'$'}ids) {
+                        |id
+                        |name
+                        |description
+                        |poster {
+                            |originalUrl
+                        |}
+                        |personRoles {
+                            |person {
+                                |name
+                            |}
+                            |rolesEn
+                        |}
+                    |}
+                |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("ids", "${track.remoteId}")
+                }
+            }
+            with(json) {
+                authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMMetadata>()
+                    .let {
+                        if (it.data.mangas.isEmpty()) throw Exception("Could not get metadata from Shikimori")
+                        val manga = it.data.mangas[0]
+                        TrackMangaMetadata(
+                            remoteId = manga.id.toLong(),
+                            title = manga.name,
+                            thumbnailUrl = manga.poster.originalUrl,
+                            description = manga.description,
+                            authors = manga.personRoles
+                                ?.filter { it.rolesEn.contains("Story") || it.rolesEn.contains("Story & Art") }
+                                ?.map { it.person.name }
+                                ?.joinToString(", ")
+                                ?.ifEmpty { null },
+                            artists = manga.personRoles
+                                ?.filter { it.rolesEn.contains("Art") || it.rolesEn.contains("Story & Art") }
+                                ?.map { it.person.name }
+                                ?.joinToString(", ")
+                                ?.ifEmpty { null },
+                        )
+                    }
+            }
+        }
+    }
+
+    suspend fun getAnimeMetadata(track: DomainAnimeTrack): TrackAnimeMetadata {
+        return withIOContext {
+            val query = """
+                |query(${'$'}ids: String!) {
+                    |animes(ids: ${'$'}ids) {
+                        |id
+                        |name
+                        |description
+                        |poster {
+                            |originalUrl
+                        |}
+                        |personRoles {
+                            |person {
+                                |name
+                            |}
+                            |rolesEn
+                        |}
+                    |}
+                |}
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("ids", "${track.remoteId}")
+                }
+            }
+            with(json) {
+                authClient.newCall(
+                    POST(
+                        GRAPHQL_API_URL,
+                        body = payload.toString().toRequestBody(jsonMime),
+                    ),
+                )
+                    .awaitSuccess()
+                    .parseAs<SMMetadata>()
+                    .let {
+                        if (it.data.animes.isEmpty()) throw Exception("Could not get metadata from Shikimori")
+                        val anime = it.data.animes[0]
+                        TrackAnimeMetadata(
+                            remoteId = anime.id.toLong(),
+                            title = anime.name,
+                            thumbnailUrl = anime.poster.originalUrl,
+                            description = anime.description,
+                            authors = anime.personRoles
+                                ?.filter { it.rolesEn.contains("Story") || it.rolesEn.contains("Story & Art") }
+                                ?.map { it.person.name }
+                                ?.joinToString(", ")
+                                ?.ifEmpty { null },
+                            artists = anime.personRoles
+                                ?.filter { it.rolesEn.contains("Art") || it.rolesEn.contains("Story & Art") }
+                                ?.map { it.person.name }
+                                ?.joinToString(", ")
+                                ?.ifEmpty { null },
+                        )
+                    }
+            }
+        }
+    }
+
+    suspend fun accessToken(code: String): SMOAuth {
+        return withIOContext {
+            with(json) {
+                client.newCall(accessTokenRequest(code))
+                    .awaitSuccess()
+                    .parseAs()
+            }
+        }
+    }
+
+    private fun accessTokenRequest(code: String) = POST(
+        OAUTH_URL,
+        body = FormBody.Builder()
+            .add("grant_type", "authorization_code")
+            .add("client_id", CLIENT_ID)
+            .add("client_secret", CLIENT_SECRET)
+            .add("code", code)
+            .add("redirect_uri", REDIRECT_URL)
+            .build(),
+    )
+
+    companion object {
+        const val BASE_URL = "https://shikimori.one"
+        private const val API_URL = "$BASE_URL/api"
+        private const val GRAPHQL_API_URL = "$BASE_URL/api/graphql"
+        private const val OAUTH_URL = "$BASE_URL/oauth/token"
+        private const val LOGIN_URL = "$BASE_URL/oauth/authorize"
+
+        private const val REDIRECT_URL = "animetail://shikimori-auth"
+
+        private const val CLIENT_ID = "aOAYRqOLwxpA8skpcQIXetNy4cw2rn2fRzScawlcQ5U"
+        private const val CLIENT_SECRET = "jqjmORn6bh2046ulkm4lHEwJ3OA1RmO3FD2sR9f6Clw"
+
+        fun authUrl(): Uri = LOGIN_URL.toUri().buildUpon()
+            .appendQueryParameter("client_id", CLIENT_ID)
+            .appendQueryParameter("redirect_uri", REDIRECT_URL)
+            .appendQueryParameter("response_type", "code")
+            .build()
+
+        fun refreshTokenRequest(token: String) = POST(
+            OAUTH_URL,
+            body = FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("client_id", CLIENT_ID)
+                .add("client_secret", CLIENT_SECRET)
+                .add("refresh_token", token)
+                .build(),
+        )
+    }
+}

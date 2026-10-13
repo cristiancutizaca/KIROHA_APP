@@ -1,0 +1,8 @@
+ALTER TABLE kiroha_download_record ADD COLUMN chapter_id TEXT;
+ALTER TABLE kiroha_download_record ADD COLUMN source_namespace TEXT;
+ALTER TABLE kiroha_download_record ADD COLUMN canonical_id TEXT;
+
+CREATE INDEX kiroha_download_chapter_index ON kiroha_download_record(chapter_id);
+CREATE INDEX kiroha_download_source_canonical_index ON kiroha_download_record(source_namespace, canonical_id);
+CREATE INDEX kiroha_download_storage_state_index ON kiroha_download_record(storage_id, state);
+CREATE INDEX kiroha_download_history_index ON kiroha_download_record(downloaded_ever, last_verified_at);

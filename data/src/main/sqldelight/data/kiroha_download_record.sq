@@ -1,0 +1,44 @@
+import kotlin.Boolean;
+
+CREATE TABLE kiroha_download_record(
+    id TEXT NOT NULL PRIMARY KEY,
+    item_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    storage_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    downloaded_ever INTEGER AS Boolean NOT NULL,
+    local_path TEXT,
+    size INTEGER NOT NULL DEFAULT 0,
+    checksum TEXT,
+    downloaded_at INTEGER,
+    last_verified_at INTEGER,
+    deleted_at INTEGER,
+    chapter_id TEXT,
+    source_namespace TEXT,
+    canonical_id TEXT
+);
+
+CREATE INDEX kiroha_download_item_index ON kiroha_download_record(item_id);
+CREATE INDEX kiroha_download_device_index ON kiroha_download_record(device_id, state);
+
+getKirohaDownloadsForItem:
+SELECT * FROM kiroha_download_record WHERE item_id = :itemId;
+
+getKirohaDownloads:
+SELECT * FROM kiroha_download_record ORDER BY item_id, device_id;
+
+upsertKirohaDownload:
+INSERT INTO kiroha_download_record(id, item_id, device_id, storage_id, state, downloaded_ever, local_path, size, checksum, downloaded_at, last_verified_at, deleted_at, chapter_id, source_namespace, canonical_id)
+VALUES (:id, :itemId, :deviceId, :storageId, :state, :downloadedEver, :localPath, :size, :checksum, :downloadedAt, :lastVerifiedAt, :deletedAt, :chapterId, :sourceNamespace, :canonicalId)
+ON CONFLICT(id) DO UPDATE SET
+    state = :state,
+    downloaded_ever = :downloadedEver,
+    local_path = :localPath,
+    size = :size,
+    checksum = :checksum,
+    downloaded_at = :downloadedAt,
+    last_verified_at = :lastVerifiedAt,
+    deleted_at = :deletedAt,
+    chapter_id = :chapterId,
+    source_namespace = :sourceNamespace,
+    canonical_id = :canonicalId;

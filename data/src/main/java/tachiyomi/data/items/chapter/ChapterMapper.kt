@@ -1,0 +1,45 @@
+package tachiyomi.data.items.chapter
+
+import kotlinx.serialization.json.JsonObject
+import tachiyomi.domain.items.chapter.model.Chapter
+
+object ChapterMapper {
+    @Suppress("LongParameterList")
+    fun mapChapter(
+        id: Long,
+        mangaId: Long,
+        url: String,
+        name: String,
+        scanlator: String?,
+        read: Boolean,
+        bookmark: Boolean,
+        lastPageRead: Long,
+        chapterNumber: Double,
+        sourceOrder: Long,
+        dateFetch: Long,
+        dateUpload: Long,
+        lastModifiedAt: Long,
+        version: Long,
+        @Suppress("UNUSED_PARAMETER")
+        isSyncing: Long,
+        dateUploadOverride: Long,
+        memo: JsonObject,
+    ): Chapter = Chapter(
+        id = id,
+        mangaId = mangaId,
+        read = read,
+        bookmark = bookmark,
+        lastPageRead = lastPageRead,
+        dateFetch = dateFetch,
+        sourceOrder = sourceOrder,
+        url = url,
+        name = name,
+        dateUpload = dateUpload,
+        chapterNumber = chapterNumber,
+        scanlator = scanlator,
+        lastModifiedAt = lastModifiedAt,
+        version = version,
+        dateUploadOverride = dateUploadOverride,
+        memo = memo,
+    )
+}

@@ -1,0 +1,16 @@
+CREATE TABLE kiroha_sync_space(
+    space_id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    global_revision INTEGER NOT NULL DEFAULT 0
+);
+
+getKirohaSyncSpace:
+SELECT * FROM kiroha_sync_space WHERE space_id = :spaceId;
+
+upsertKirohaSyncSpace:
+INSERT INTO kiroha_sync_space(space_id, name, created_at, global_revision)
+VALUES (:spaceId, :name, :createdAt, :globalRevision)
+ON CONFLICT(space_id) DO UPDATE SET
+    name = :name,
+    global_revision = :globalRevision;

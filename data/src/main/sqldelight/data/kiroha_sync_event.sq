@@ -1,0 +1,30 @@
+import kotlin.Boolean;
+
+CREATE TABLE kiroha_sync_event(
+    event_id TEXT NOT NULL PRIMARY KEY,
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    device_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    acknowledged INTEGER AS Boolean NOT NULL DEFAULT 0
+);
+
+CREATE INDEX kiroha_sync_event_pending_index ON kiroha_sync_event(acknowledged, timestamp);
+CREATE INDEX kiroha_sync_event_entity_index ON kiroha_sync_event(entity, entity_id, revision);
+
+getPendingKirohaSyncEvents:
+SELECT * FROM kiroha_sync_event WHERE acknowledged = 0 ORDER BY timestamp ASC;
+
+insertKirohaSyncEvent:
+INSERT OR IGNORE INTO kiroha_sync_event(event_id, entity, entity_id, operation, revision, timestamp, device_id, payload, acknowledged)
+VALUES (:eventId, :entity, :entityId, :operation, :revision, :timestamp, :deviceId, :payload, 0);
+
+insertRemoteKirohaSyncEvent:
+INSERT OR IGNORE INTO kiroha_sync_event(event_id, entity, entity_id, operation, revision, timestamp, device_id, payload, acknowledged)
+VALUES (:eventId, :entity, :entityId, :operation, :revision, :timestamp, :deviceId, :payload, 1);
+
+acknowledgeKirohaSyncEvent:
+UPDATE kiroha_sync_event SET acknowledged = 1 WHERE event_id = :eventId;

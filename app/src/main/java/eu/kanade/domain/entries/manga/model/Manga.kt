@@ -1,0 +1,138 @@
+package eu.kanade.domain.entries.manga.model
+
+import android.content.Context
+import eu.kanade.tachiyomi.data.cache.MangaCoverCache
+import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
+import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import mihon.app.di.appGraph
+import tachiyomi.core.common.preference.TriState
+import tachiyomi.core.metadata.comicinfo.ComicInfo
+import tachiyomi.core.metadata.comicinfo.ComicInfoPublishingStatus
+import tachiyomi.domain.entries.manga.model.Manga
+import tachiyomi.domain.items.chapter.model.Chapter
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+
+// TODO: move these into the domain model
+val Manga.readingMode: Long
+    get() = viewerFlags and ReadingMode.MASK.toLong()
+
+val Manga.readerOrientation: Long
+    get() = viewerFlags and ReaderOrientation.MASK.toLong()
+
+val Manga.downloadedFilter: TriState
+    get() {
+        if (Injekt.get<Context>().appGraph.basePreferences.downloadedOnly.get()) return TriState.ENABLED_IS
+        return when (downloadedFilterRaw) {
+            Manga.CHAPTER_SHOW_DOWNLOADED -> TriState.ENABLED_IS
+            Manga.CHAPTER_SHOW_NOT_DOWNLOADED -> TriState.ENABLED_NOT
+            else -> TriState.DISABLED
+        }
+    }
+fun Manga.chaptersFiltered(): Boolean {
+    return unreadFilter != TriState.DISABLED ||
+        downloadedFilter != TriState.DISABLED ||
+        bookmarkedFilter != TriState.DISABLED
+}
+
+fun Manga.toSManga(): SManga = SManga.create().also {
+    it.url = url
+    it.title = title
+    it.artist = artist
+    it.author = author
+    it.description = description
+    it.genre = genre.orEmpty().joinToString()
+    it.status = status.toInt()
+    it.thumbnail_url = thumbnailUrl
+    it.update_strategy = updateStrategy
+    it.initialized = initialized
+    it.memo = memo
+}
+
+fun Manga.copyFrom(other: SManga): Manga {
+    // SY -->
+    val author = other.author ?: ogAuthor
+    val artist = other.artist ?: ogArtist
+    val description = other.description ?: ogDescription
+    val genres = if (other.genre != null) {
+        other.getGenres()
+    } else {
+        ogGenre
+    }
+    // SY <--
+    val thumbnailUrl = other.thumbnail_url ?: thumbnailUrl
+    return this.copy(
+        // SY -->
+        ogAuthor = author,
+        ogArtist = artist,
+        ogDescription = description,
+        ogGenre = genres,
+        // SY <--
+        thumbnailUrl = thumbnailUrl,
+        // SY -->
+        ogStatus = other.status.toLong(),
+        // SY <--
+        updateStrategy = other.update_strategy,
+        initialized = other.initialized && initialized,
+        memo = other.memo,
+    )
+}
+
+fun SManga.toDomainManga(sourceId: Long): Manga {
+    return Manga.create().copy(
+        url = url,
+        ogTitle = title,
+        ogArtist = artist,
+        ogAuthor = author,
+        ogDescription = description,
+        ogGenre = getGenres(),
+        ogStatus = status.toLong(),
+        thumbnailUrl = thumbnail_url,
+        updateStrategy = update_strategy,
+        initialized = initialized,
+        source = sourceId,
+        memo = memo,
+    )
+}
+
+fun Manga.hasCustomCover(coverCache: MangaCoverCache = Injekt.get<Context>().appGraph.mangaCoverCache): Boolean {
+    return coverCache.getCustomCoverFile(id).exists()
+}
+
+/**
+ * Creates a ComicInfo instance based on the manga and chapter metadata.
+ */
+fun getComicInfo(
+    manga: Manga,
+    chapter: Chapter,
+    urls: List<String>,
+    categories: List<String>?,
+    sourceName: String,
+) = ComicInfo(
+    title = ComicInfo.Title(chapter.name),
+    series = ComicInfo.Series(manga.title),
+    number = chapter.chapterNumber.takeIf { it >= 0 }?.let {
+        if ((it.rem(1) == 0.0)) {
+            ComicInfo.Number(it.toInt().toString())
+        } else {
+            ComicInfo.Number(it.toString())
+        }
+    },
+    web = ComicInfo.Web(urls.joinToString(" ")),
+    summary = manga.description?.let { ComicInfo.Summary(it) },
+    writer = manga.author?.let { ComicInfo.Writer(it) },
+    penciller = manga.artist?.let { ComicInfo.Penciller(it) },
+    translator = chapter.scanlator?.let { ComicInfo.Translator(it) },
+    genre = manga.genre?.let { ComicInfo.Genre(it.joinToString()) },
+    publishingStatus = ComicInfo.PublishingStatusTachiyomi(
+        ComicInfoPublishingStatus.toComicInfoValue(manga.status),
+    ),
+    categories = categories?.let { ComicInfo.CategoriesTachiyomi(it.joinToString()) },
+    source = ComicInfo.SourceAniyomi(sourceName),
+    inker = null,
+    colorist = null,
+    letterer = null,
+    coverArtist = null,
+    tags = null,
+)

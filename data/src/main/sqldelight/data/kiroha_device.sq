@@ -1,0 +1,24 @@
+CREATE TABLE kiroha_device(
+    device_id TEXT NOT NULL PRIMARY KEY,
+    device_name TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    app_version TEXT NOT NULL,
+    capabilities TEXT NOT NULL
+);
+
+getKirohaDevice:
+SELECT * FROM kiroha_device WHERE device_id = :deviceId;
+
+getKirohaDevices:
+SELECT * FROM kiroha_device ORDER BY last_seen DESC;
+
+upsertKirohaDevice:
+INSERT INTO kiroha_device(device_id, device_name, platform, created_at, last_seen, app_version, capabilities)
+VALUES (:deviceId, :deviceName, :platform, :createdAt, :lastSeen, :appVersion, :capabilities)
+ON CONFLICT(device_id) DO UPDATE SET
+    device_name = :deviceName,
+    last_seen = :lastSeen,
+    app_version = :appVersion,
+    capabilities = :capabilities;

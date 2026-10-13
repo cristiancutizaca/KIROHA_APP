@@ -1,0 +1,254 @@
+package tachiyomi.data.entries.anime
+
+import aniyomi.domain.anime.SeasonAnime
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.flow.Flow
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
+import tachiyomi.data.AnimeUpdateStrategyColumnAdapter
+import tachiyomi.data.CastColumnAdapter
+import tachiyomi.data.FetchTypeColumnAdapter
+import tachiyomi.data.MemoColumnAdapter
+import tachiyomi.data.StringListColumnAdapter
+import tachiyomi.data.entries.anime.AnimeMapper
+import tachiyomi.data.handlers.anime.AnimeDatabaseHandler
+import tachiyomi.domain.entries.anime.model.Anime
+import tachiyomi.domain.entries.anime.model.AnimeUpdate
+import tachiyomi.domain.entries.anime.repository.AnimeRepository
+import tachiyomi.domain.library.anime.LibraryAnime
+import tachiyomi.domain.source.anime.model.DeletableAnime
+import kotlin.time.Clock
+
+@Inject
+@SingleIn(AppScope::class)
+@ContributesBinding(AppScope::class)
+class AnimeRepositoryImpl(
+    private val handler: AnimeDatabaseHandler,
+) : AnimeRepository {
+
+    override suspend fun getAnimeById(id: Long): Anime {
+        return handler.awaitOne { animesQueries.getAnimeById(id, AnimeMapper::mapAnime) }
+    }
+
+    override fun getAnimeByIdAsFlow(id: Long): Flow<Anime> {
+        return handler.subscribeToOne { animesQueries.getAnimeById(id, AnimeMapper::mapAnime) }
+    }
+
+    override suspend fun getAnimeByUrlAndSourceId(url: String, sourceId: Long): Anime? {
+        return handler.awaitOneOrNull {
+            animesQueries.getAnimeByUrlAndSource(
+                url,
+                sourceId,
+                AnimeMapper::mapAnime,
+            )
+        }
+    }
+
+    override fun getAnimeByUrlAndSourceIdAsFlow(url: String, sourceId: Long): Flow<Anime?> {
+        return handler.subscribeToOneOrNull {
+            animesQueries.getAnimeByUrlAndSource(
+                url,
+                sourceId,
+                AnimeMapper::mapAnime,
+            )
+        }
+    }
+
+    override suspend fun getAnimeFavorites(): List<Anime> {
+        return handler.awaitList { animesQueries.getFavorites(AnimeMapper::mapAnime) }
+    }
+
+    override suspend fun getWatchedAnimeNotInLibrary(): List<Anime> {
+        return handler.awaitList { animesQueries.getWatchedAnimeNotInLibrary(AnimeMapper::mapAnime) }
+    }
+
+    override suspend fun getLibraryAnime(): List<LibraryAnime> {
+        return handler.awaitList { animelibViewQueries.animelib(AnimeMapper::mapLibraryAnime) }
+    }
+
+    override fun getLibraryAnimeAsFlow(): Flow<List<LibraryAnime>> {
+        return handler.subscribeToList { animelibViewQueries.animelib(AnimeMapper::mapLibraryAnime) }
+    }
+
+    override fun getAnimeFavoritesBySourceId(sourceId: Long): Flow<List<Anime>> {
+        return handler.subscribeToList { animesQueries.getFavoriteBySourceId(sourceId, AnimeMapper::mapAnime) }
+    }
+
+    override suspend fun getDuplicateLibraryAnime(id: Long, title: String): List<Anime> {
+        return handler.awaitList {
+            animesQueries.getDuplicateLibraryAnime(title, id, AnimeMapper::mapAnime)
+        }
+    }
+
+    override suspend fun getUpcomingAnime(
+        statuses: Set<Long>,
+        excludedCategories: List<Long>,
+        includedCategories: List<Long>,
+    ): Flow<List<Anime>> {
+        val timeZone = TimeZone.currentSystemDefault()
+        val epochMillis =
+            Clock.System.now().toLocalDateTime(timeZone).date.atStartOfDayIn(timeZone).toEpochMilliseconds()
+        return handler.subscribeToList {
+            animesQueries.getUpcomingAnime(
+                startOfDay = epochMillis,
+                statuses = statuses,
+                includedEmpty = includedCategories.isEmpty(),
+                includedCategories = includedCategories,
+                excludedEmpty = excludedCategories.isEmpty(),
+                excludedCategories = excludedCategories,
+                mapper = AnimeMapper::mapAnime,
+            )
+        }
+    }
+
+    override suspend fun resetAnimeViewerFlags(): Boolean {
+        return try {
+            handler.await { animesQueries.resetViewerFlags() }
+            true
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            false
+        }
+    }
+
+    override suspend fun setAnimeCategories(animeId: Long, categoryIds: List<Long>) {
+        handler.await(inTransaction = true) {
+            animes_categoriesQueries.deleteAnimeCategoryByAnimeId(animeId)
+            categoryIds.map { categoryId ->
+                animes_categoriesQueries.insert(animeId, categoryId)
+            }
+        }
+    }
+
+    override suspend fun insertAnime(anime: Anime): Long? {
+        return handler.awaitOneOrNullExecutable(inTransaction = true) {
+            animesQueries.insertReturningId(
+                source = anime.source,
+                url = anime.url,
+                artist = anime.artist,
+                author = anime.author,
+                description = anime.description,
+                genre = anime.genre,
+                title = anime.title,
+                status = anime.status,
+                thumbnailUrl = anime.thumbnailUrl,
+                backgroundUrl = anime.backgroundUrl,
+                favorite = anime.favorite,
+                lastUpdate = anime.lastUpdate,
+                nextUpdate = anime.nextUpdate,
+                calculateInterval = anime.fetchInterval.toLong(),
+                initialized = anime.initialized,
+                viewerFlags = anime.viewerFlags,
+                episodeFlags = anime.episodeFlags,
+                coverLastModified = anime.coverLastModified,
+                backgroundLastModified = anime.backgroundLastModified,
+                dateAdded = anime.dateAdded,
+                updateStrategy = anime.updateStrategy,
+                version = anime.version,
+                notes = anime.notes,
+                fetchType = anime.fetchType,
+                parentId = anime.parentId,
+                seasonFlags = anime.seasonFlags,
+                seasonNumber = anime.seasonNumber,
+                seasonSourceOrder = anime.seasonSourceOrder,
+                cast = anime.cast,
+                memo = anime.memo,
+            )
+        }
+    }
+
+    override suspend fun updateAnime(update: AnimeUpdate): Boolean {
+        return try {
+            partialUpdateAnime(update)
+            true
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            false
+        }
+    }
+
+    override suspend fun updateAllAnime(animeUpdates: List<AnimeUpdate>): Boolean {
+        return try {
+            partialUpdateAnime(*animeUpdates.toTypedArray())
+            true
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            false
+        }
+    }
+
+    override suspend fun getAnimeSeasonsById(parentId: Long): List<SeasonAnime> {
+        return handler.awaitList { animeseasonsViewQueries.getAnimeSeasonsById(parentId, AnimeMapper::mapSeasonAnime) }
+    }
+
+    override fun getAnimeSeasonsByIdAsFlow(parentId: Long): Flow<List<SeasonAnime>> {
+        return handler.subscribeToList {
+            animeseasonsViewQueries.getAnimeSeasonsById(parentId, AnimeMapper::mapSeasonAnime)
+        }
+    }
+
+    override suspend fun removeParentIdByIds(animeIds: List<Long>) {
+        try {
+            handler.await { animesQueries.removeParentIdByIds(animeIds) }
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+        }
+    }
+
+    override fun getDeletableParentAnime(): Flow<List<DeletableAnime>> {
+        return handler.subscribeToList {
+            animedeletableViewQueries.getDeletableParentAnime(AnimeMapper::mapDeletableAnime)
+        }
+    }
+
+    override suspend fun getChildrenByParentId(parentId: Long): List<Anime> {
+        return handler.awaitList { animesQueries.getChildrenByParentId(parentId, AnimeMapper::mapAnime) }
+    }
+
+    private suspend fun partialUpdateAnime(vararg animeUpdates: AnimeUpdate) {
+        handler.await(inTransaction = true) {
+            animeUpdates.forEach { value ->
+                animesQueries.update(
+                    source = value.source,
+                    url = value.url,
+                    artist = value.artist,
+                    author = value.author,
+                    description = value.description,
+                    genre = value.genre?.let(StringListColumnAdapter::encode),
+                    title = value.title,
+                    status = value.status,
+                    thumbnailUrl = value.thumbnailUrl,
+                    backgroundUrl = value.backgroundUrl,
+                    favorite = value.favorite,
+                    lastUpdate = value.lastUpdate,
+                    nextUpdate = value.nextUpdate,
+                    calculateInterval = value.fetchInterval?.toLong(),
+                    initialized = value.initialized,
+                    viewer = value.viewerFlags,
+                    episodeFlags = value.episodeFlags,
+                    coverLastModified = value.coverLastModified,
+                    backgroundLastModified = value.backgroundLastModified,
+                    dateAdded = value.dateAdded,
+                    cast = value.cast?.let(CastColumnAdapter::encode),
+                    animeId = value.id,
+                    updateStrategy = value.updateStrategy?.let(AnimeUpdateStrategyColumnAdapter::encode),
+                    version = value.version,
+                    isSyncing = 0,
+                    notes = value.notes,
+                    fetchType = value.fetchType?.let(FetchTypeColumnAdapter::encode),
+                    parentId = value.parentId,
+                    seasonFlags = value.seasonFlags,
+                    seasonNumber = value.seasonNumber,
+                    seasonSourceOrder = value.seasonSourceOrder,
+                    memo = value.memo?.let(MemoColumnAdapter::encode),
+                )
+            }
+        }
+    }
+}

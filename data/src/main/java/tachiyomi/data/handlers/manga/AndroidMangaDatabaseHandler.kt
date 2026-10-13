@@ -1,0 +1,115 @@
+package tachiyomi.data.handlers.manga
+
+import androidx.paging.PagingSource
+import app.cash.sqldelight.ExecutableQuery
+import app.cash.sqldelight.Query
+import app.cash.sqldelight.async.coroutines.awaitAsList
+import app.cash.sqldelight.async.coroutines.awaitAsOne
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.db.SqlDriver
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import tachiyomi.data.Database
+import tachiyomi.data.subscribeToList
+import tachiyomi.data.subscribeToOne
+import tachiyomi.data.subscribeToOneOrNull
+
+@Inject
+@SingleIn(AppScope::class)
+@ContributesBinding(AppScope::class)
+class AndroidMangaDatabaseHandler(
+    val db: Database,
+    val driver: SqlDriver,
+    val queryDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    val transactionDispatcher: CoroutineDispatcher = queryDispatcher,
+) : MangaDatabaseHandler {
+
+    val suspendingTransactionId = ThreadLocal<Int>()
+
+    override suspend fun <T> await(inTransaction: Boolean, block: suspend Database.() -> T): T {
+        return dispatch(inTransaction, block)
+    }
+
+    override suspend fun <T : Any> awaitList(
+        inTransaction: Boolean,
+        block: suspend Database.() -> Query<T>,
+    ): List<T> {
+        return dispatch(inTransaction) { block(db).awaitAsList() }
+    }
+
+    override suspend fun <T : Any> awaitOne(
+        inTransaction: Boolean,
+        block: suspend Database.() -> Query<T>,
+    ): T {
+        return dispatch(inTransaction) { block(db).awaitAsOne() }
+    }
+
+    override suspend fun <T : Any> awaitOneExecutable(
+        inTransaction: Boolean,
+        block: suspend Database.() -> ExecutableQuery<T>,
+    ): T {
+        return dispatch(inTransaction) { block(db).awaitAsOne() }
+    }
+
+    override suspend fun <T : Any> awaitOneOrNull(
+        inTransaction: Boolean,
+        block: suspend Database.() -> Query<T>,
+    ): T? {
+        return dispatch(inTransaction) { block(db).awaitAsOneOrNull() }
+    }
+
+    override suspend fun <T : Any> awaitOneOrNullExecutable(
+        inTransaction: Boolean,
+        block: suspend Database.() -> ExecutableQuery<T>,
+    ): T? {
+        return dispatch(inTransaction) { block(db).awaitAsOneOrNull() }
+    }
+
+    override fun <T : Any> subscribeToList(block: Database.() -> Query<T>): Flow<List<T>> {
+        return block(db).subscribeToList(queryDispatcher)
+    }
+
+    override fun <T : Any> subscribeToOne(block: Database.() -> Query<T>): Flow<T> {
+        return block(db).subscribeToOne(queryDispatcher)
+    }
+
+    override fun <T : Any> subscribeToOneOrNull(block: Database.() -> Query<T>): Flow<T?> {
+        return block(db).subscribeToOneOrNull(queryDispatcher)
+    }
+
+    override fun <T : Any> subscribeToPagingSource(
+        countQuery: Database.() -> Query<Long>,
+        queryProvider: Database.(Long, Long) -> Query<T>,
+    ): PagingSource<Long, T> {
+        return QueryPagingMangaSource(
+            handler = this,
+            countQuery = countQuery,
+            queryProvider = { limit, offset ->
+                queryProvider.invoke(db, limit, offset)
+            },
+        )
+    }
+
+    private suspend fun <T> dispatch(inTransaction: Boolean, block: suspend Database.() -> T): T {
+        // Create a transaction if needed and run the calling block inside it.
+        if (inTransaction) {
+            return withMangaTransaction { block(db) }
+        }
+
+        // If we're currently in the transaction thread, there's no need to dispatch our query.
+        if (driver.currentTransaction() != null) {
+            return block(db)
+        }
+
+        // Get the current database context and run the calling block.
+        val context = getCurrentMangaDatabaseContext()
+        return withContext(context) { block(db) }
+    }
+}

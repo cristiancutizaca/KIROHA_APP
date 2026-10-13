@@ -1,0 +1,23 @@
+# Build files
+.gradle
+.kotlin
+build
+app/release/
+
+# IDE files
+*.iml
+.idea/*
+!.idea/icon.png
+/captures
+app/**/assets/client_secrets.json
+
+# External native build folder generated in Android Studio 2.2 and later
+.externalNativeBuild
+.cxx/
+
+
+# Configuration files
+local.properties
+
+# macOS specific files
+.DS_Store

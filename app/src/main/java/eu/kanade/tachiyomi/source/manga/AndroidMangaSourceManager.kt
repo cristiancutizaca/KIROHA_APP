@@ -1,0 +1,124 @@
+package eu.kanade.tachiyomi.source.manga
+
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.SingleIn
+import eu.kanade.tachiyomi.data.download.manga.MangaDownloadManager
+import eu.kanade.tachiyomi.extension.manga.MangaExtensionManager
+import eu.kanade.tachiyomi.source.CatalogueSource
+import eu.kanade.tachiyomi.source.MangaSource
+import eu.kanade.tachiyomi.source.online.HttpSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
+import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.domain.source.manga.model.StubMangaSource
+import tachiyomi.domain.source.manga.repository.MangaStubSourceRepository
+import tachiyomi.domain.source.manga.service.MangaSourceManager
+import tachiyomi.source.local.entries.manga.LocalMangaSource
+import java.util.concurrent.ConcurrentHashMap
+
+@Inject
+@SingleIn(AppScope::class)
+@ContributesBinding(AppScope::class)
+class AndroidMangaSourceManager(
+    private val extensionManager: MangaExtensionManager,
+    private val sourceRepository: MangaStubSourceRepository,
+    private val localSource: LocalMangaSource,
+    private val downloadManager: Lazy<MangaDownloadManager>,
+) : MangaSourceManager {
+
+    private val _isInitialized = MutableStateFlow(false)
+    override val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val sourcesMapFlow = MutableStateFlow(ConcurrentHashMap<Long, MangaSource>())
+
+    private val stubSourcesMap = ConcurrentHashMap<Long, StubMangaSource>()
+
+    override val catalogueSources: Flow<List<CatalogueSource>> = sourcesMapFlow.map {
+        it.values.filterIsInstance<CatalogueSource>()
+    }
+
+    init {
+        scope.launchIO {
+            extensionManager.isInitialized.first { it }
+
+            extensionManager.installedExtensionsFlow
+                .collectLatest { extensions ->
+                    val mutableMap = ConcurrentHashMap<Long, MangaSource>(
+                        mapOf(LocalMangaSource.ID to localSource),
+                    )
+                    extensions.forEach { extension ->
+                        extension.sources.forEach {
+                            mutableMap[it.id] = it
+                            registerStubSource(StubMangaSource.from(it))
+                        }
+                    }
+                    sourcesMapFlow.value = mutableMap
+                    _isInitialized.value = true
+                }
+        }
+
+        scope.launchIO {
+            sourceRepository.subscribeAllManga()
+                .collectLatest { sources ->
+                    val mutableMap = stubSourcesMap.toMutableMap()
+                    sources.forEach {
+                        mutableMap[it.id] = it
+                    }
+                }
+        }
+    }
+
+    override fun get(sourceKey: Long): MangaSource? {
+        return sourcesMapFlow.value[sourceKey]
+    }
+
+    override fun getOrStub(sourceKey: Long): MangaSource {
+        return sourcesMapFlow.value[sourceKey] ?: stubSourcesMap.getOrPut(sourceKey) {
+            runBlocking { createStubSource(sourceKey) }
+        }
+    }
+
+    override fun getOnlineSources() = sourcesMapFlow.value.values.filterIsInstance<HttpSource>()
+
+    override fun getCatalogueSources() = sourcesMapFlow.value.values.filterIsInstance<CatalogueSource>()
+
+    override fun getStubSources(): List<StubMangaSource> {
+        val onlineSourceIds = getOnlineSources().map { it.id }
+        return stubSourcesMap.values.filterNot { it.id in onlineSourceIds }
+    }
+
+    private fun registerStubSource(source: StubMangaSource) {
+        scope.launchIO {
+            val dbSource = sourceRepository.getStubMangaSource(source.id)
+            if (dbSource == source) return@launchIO
+            sourceRepository.upsertStubMangaSource(source.id, source.lang, source.name)
+            if (dbSource != null) {
+                downloadManager.value.renameSource(dbSource, source)
+            }
+        }
+    }
+
+    private suspend fun createStubSource(id: Long): StubMangaSource {
+        sourceRepository.getStubMangaSource(id)?.let {
+            return it
+        }
+        extensionManager.getSourceData(id)?.let {
+            registerStubSource(it)
+            return it
+        }
+        return StubMangaSource(id = id, lang = "", name = "")
+    }
+}
