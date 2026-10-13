@@ -43,22 +43,32 @@ abstract class SourcePagingSource(
     abstract suspend fun requestNextPage(currentPage: Int): MangasPage
 
     override suspend fun load(params: LoadParams<Long>): LoadResult<Long, SManga> {
-        val page = params.key ?: 1
-
-        val mangasPage = try {
-            withIOContext {
-                requestNextPage(page.toInt())
+        var page = params.key ?: 1
+        // Some extensions yield empty or entirely repeated intermediate pages.
+        // Walk forward within one Paging load so Paging does not stall on an empty append.
+        repeat(MAX_SKIPPED_PAGES_PER_LOAD) {
+            val mangasPage = try {
+                withIOContext { requestNextPage(page.toInt()) }
+            } catch (e: Exception) {
+                return LoadResult.Error(e)
             }
-        } catch (e: Exception) {
-            return LoadResult.Error(e)
+            val result = pageDeduplicator.accept(mangasPage.mangas, mangasPage.hasNextPage)
+            if (result.items.isNotEmpty() || !result.hasNext) {
+                return LoadResult.Page(
+                    data = result.items,
+                    prevKey = null,
+                    nextKey = if (result.hasNext) page + 1 else null,
+                )
+            }
+            page++
         }
+        // The deduplicator's bounded loop guard avoids requesting infinite
+        // copies from broken extensions. Do not spin forever on empty pages.
+        return LoadResult.Page(data = emptyList(), prevKey = null, nextKey = null)
+    }
 
-        val result = pageDeduplicator.accept(mangasPage.mangas, mangasPage.hasNextPage)
-        return LoadResult.Page(
-            data = result.items,
-            prevKey = null,
-            nextKey = if (result.hasNext) page + 1 else null,
-        )
+    private companion object {
+        const val MAX_SKIPPED_PAGES_PER_LOAD = 6
     }
 
     override fun getRefreshKey(state: PagingState<Long, SManga>): Long? {
