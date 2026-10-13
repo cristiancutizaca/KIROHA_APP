@@ -17,6 +17,9 @@ interface StorageProvider {
     fun write(relativePath: String): OutputStream
     fun delete(relativePath: String): Boolean
     fun fingerprint(relativePath: String): FileFingerprint
+
+    /** Optional legacy metadata-only fingerprint used only to migrate older records. */
+    fun legacyFingerprint(relativePath: String): String? = null
 }
 
 enum class StorageType { INTERNAL, SAF_TREE, USB, UNKNOWN }
@@ -122,7 +125,12 @@ object DownloadReconciler {
         val path = record.localPath ?: return record.copy(state = DownloadAvailability.MISSING, lastVerifiedAt = now)
         val file = storage.resolve(path) ?: return record.copy(state = DownloadAvailability.MISSING, lastVerifiedAt = now)
         val fingerprint = storage.fingerprint(path)
-        val matches = record.checksum == null || record.checksum == fingerprint.value
+        val matches = record.checksum == null ||
+            record.checksum == fingerprint.value ||
+            // Older Kiroha recorded a names-and-lengths-only checksum. Accept it
+            // once when it still matches the files, then migrate to the verified
+            // current fingerprint below. Do not mark all existing copies as corrupt.
+            runCatching { storage.legacyFingerprint(path) }.getOrNull() == record.checksum
         return record.copy(
             state = if (matches) DownloadAvailability.AVAILABLE_LOCAL else DownloadAvailability.ERROR,
             size = file.size,
