@@ -782,8 +782,10 @@ class MangaDownloader(
         }
 
         pause()
-        internalClearQueue()
-        addAllToQueue(downloads)
+        downloads.forEach { it.status = MangaDownload.State.QUEUE }
+        // A two-step clear + add can permanently erase queued work on process death.
+        store.replaceAll(downloads)
+        _queueState.value = downloads.distinctBy { it.chapter.id }
 
         if (wasRunning) {
             start()
