@@ -121,12 +121,17 @@ class MangaDownloader(
      * Whether the downloader is paused
      */
     @Volatile
-    var isPaused: Boolean = false
+    var isPaused: Boolean = store.isPaused()
 
     init {
         scope.launch {
-            val chapters = async { store.restore() }
-            addAllToQueue(chapters.await())
+            // Restore without deleting the persisted queue. Enqueues may arrive during startup,
+            // so merge by stable local item ID rather than overwriting current state.
+            val restored = store.restore()
+            restored.forEach { it.status = MangaDownload.State.QUEUE }
+            _queueState.update { current ->
+                (restored + current).distinctBy { it.chapter.id }
+            }
         }
     }
 
@@ -145,6 +150,7 @@ class MangaDownloader(
         pending.forEach { if (it.status != MangaDownload.State.QUEUE) it.status = MangaDownload.State.QUEUE }
 
         isPaused = false
+        store.setPaused(false)
 
         launchDownloaderJob()
 
@@ -185,6 +191,7 @@ class MangaDownloader(
             .filter { it.status == MangaDownload.State.DOWNLOADING }
             .forEach { it.status = MangaDownload.State.QUEUE }
         isPaused = true
+        store.setPaused(true)
     }
 
     /**
@@ -284,13 +291,14 @@ class MangaDownloader(
 
         val source = sourceManager.get(manga.source) as? HttpSource ?: return
         val wasEmpty = queueState.value.isEmpty()
+        val queuedIds = queueState.value.mapTo(hashSetOf()) { it.chapter.id }
         val chaptersToQueue = chapters.asSequence()
             // Filter out those already downloaded.
             .filter { provider.findChapterDir(it.name, it.scanlator, it.url, manga.title, source) == null }
             // Add chapters to queue from the start.
             .sortedByDescending { it.sourceOrder }
             // Filter out those already enqueued.
-            .filter { chapter -> queueState.value.none { it.chapter.id == chapter.id } }
+            .filter { chapter -> chapter.id !in queuedIds }
             // Create a download for each one.
             .map { MangaDownload(source, manga, it) }
             .toList()
@@ -708,38 +716,39 @@ class MangaDownloader(
     }
 
     private fun addAllToQueue(downloads: List<MangaDownload>) {
-        _queueState.update {
-            downloads.forEach { download ->
-                download.status = MangaDownload.State.QUEUE
-            }
-            store.addAll(downloads)
-            it + downloads
+        if (downloads.isEmpty()) return
+        downloads.forEach { it.status = MangaDownload.State.QUEUE }
+        // Persist before publishing: a process death must not lose an acknowledged enqueue.
+        store.addAll(downloads)
+        _queueState.update { current ->
+            val existingIds = current.mapTo(hashSetOf()) { it.chapter.id }
+            current + downloads.filter { existingIds.add(it.chapter.id) }
         }
     }
 
     private fun removeFromQueue(download: MangaDownload) {
-        _queueState.update {
-            store.remove(download)
-            if (download.status == MangaDownload.State.DOWNLOADING || download.status == MangaDownload.State.QUEUE) {
-                download.status = MangaDownload.State.NOT_DOWNLOADED
-            }
-            it - download
+        store.remove(download)
+        if (download.status == MangaDownload.State.DOWNLOADING ||
+            download.status == MangaDownload.State.QUEUE
+        ) {
+            download.status = MangaDownload.State.NOT_DOWNLOADED
         }
+        _queueState.update { it - download }
     }
 
     private inline fun removeFromQueueIf(predicate: (MangaDownload) -> Boolean) {
-        _queueState.update { queue ->
-            val downloads = queue.filter { predicate(it) }
-            store.removeAll(downloads)
-            downloads.forEach { download ->
-                if (download.status == MangaDownload.State.DOWNLOADING ||
-                    download.status == MangaDownload.State.QUEUE
-                ) {
-                    download.status = MangaDownload.State.NOT_DOWNLOADED
-                }
+        val downloads = queueState.value.filter(predicate)
+        if (downloads.isEmpty()) return
+        store.removeAll(downloads)
+        downloads.forEach { download ->
+            if (download.status == MangaDownload.State.DOWNLOADING ||
+                download.status == MangaDownload.State.QUEUE
+            ) {
+                download.status = MangaDownload.State.NOT_DOWNLOADED
             }
-            queue - downloads
         }
+        val removed = downloads.toSet()
+        _queueState.update { queue -> queue.filterNot { it in removed } }
     }
 
     fun removeFromQueue(chapters: List<Chapter>) {
@@ -752,35 +761,35 @@ class MangaDownloader(
     }
 
     private fun internalClearQueue() {
-        _queueState.update {
-            it.forEach { download ->
+        store.clear()
+        _queueState.update { previous ->
+            previous.forEach { download ->
                 if (download.status == MangaDownload.State.DOWNLOADING ||
                     download.status == MangaDownload.State.QUEUE
                 ) {
                     download.status = MangaDownload.State.NOT_DOWNLOADED
                 }
             }
-            store.clear()
             emptyList()
         }
     }
 
     fun updateQueue(downloads: List<MangaDownload>) {
         val wasRunning = isRunning
-
         if (downloads.isEmpty()) {
             clearQueue()
             stop()
             return
         }
 
+        // Reorders must be committed atomically; clear() + addAll() loses the
+        // entire pending queue if Android kills the process between those calls.
         pause()
-        internalClearQueue()
-        addAllToQueue(downloads)
+        downloads.forEach { it.status = MangaDownload.State.QUEUE }
+        store.replaceAll(downloads)
+        _queueState.value = downloads.distinctBy { it.chapter.id }
 
-        if (wasRunning) {
-            start()
-        }
+        if (wasRunning) start()
     }
 
     companion object {
