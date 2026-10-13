@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.domain.items.chapter.model.NoChaptersException
 import tachiyomi.domain.source.manga.repository.SourcePagingSourceType
 import kiroha.core.PageDeduplicator
 
@@ -49,8 +48,6 @@ abstract class SourcePagingSource(
         val mangasPage = try {
             withIOContext {
                 requestNextPage(page.toInt())
-                    .takeIf { it.mangas.isNotEmpty() }
-                    ?: throw NoChaptersException()
             }
         } catch (e: Exception) {
             return LoadResult.Error(e)
