@@ -114,6 +114,9 @@ class AnimeDownloader(
     val isRunning: Boolean
         get() = downloaderJob?.isActive ?: false
 
+    @Volatile
+    var isPaused: Boolean = store.isPaused()
+
     // The worker must wait for on-disk queue restoration before deciding it is empty.
     private val restorationJob: Job = scope.launch {
         addAllToQueue(store.restore())
@@ -122,6 +125,9 @@ class AnimeDownloader(
     suspend fun awaitRestoration() {
         restorationJob.join()
     }
+
+    /** A recovered paused queue must not be restarted just because the process relaunched. */
+    fun hasAutoResumeWork(): Boolean = !store.isPaused() && queueState.value.isNotEmpty()
 
     /**
      * Starts the downloader. It doesn't do anything if it's already running or there isn't anything
@@ -137,6 +143,8 @@ class AnimeDownloader(
         val pending = queueState.value.filter { it.status != AnimeDownload.State.DOWNLOADED }
         pending.forEach { if (it.status != AnimeDownload.State.QUEUE) it.status = AnimeDownload.State.QUEUE }
 
+        isPaused = false
+        store.setPaused(false)
         launchDownloaderJob()
 
         return pending.isNotEmpty()
@@ -173,6 +181,8 @@ class AnimeDownloader(
         queueState.value
             .filter { it.status == AnimeDownload.State.DOWNLOADING }
             .forEach { it.status = AnimeDownload.State.QUEUE }
+        isPaused = true
+        store.setPaused(true)
     }
 
     /**
