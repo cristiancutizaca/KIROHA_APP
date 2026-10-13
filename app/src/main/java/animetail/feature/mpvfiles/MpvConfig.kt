@@ -35,10 +35,18 @@ class MpvConfig(
         if (copyJob?.isActive == true) return
 
         copyJob = scope.launchIO {
-            val mpvDir = getMpvDir()
-            copyUserFiles(mpvDir)
-            copyFontsDirectory(mpvDir)
-            writeFontsConf(mpvDir)
+            try {
+                val mpvDir = getMpvDir()
+                copyUserFiles(mpvDir)
+                copyFontsDirectory(mpvDir)
+                writeFontsConf(mpvDir)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // A broken/missing script or SAF file must not kill the entire app
+                // through an uncaught exception in this independent IO coroutine.
+                logcat(LogPriority.ERROR, error) { "Could not refresh mpv files" }
+            }
         }
     }
 
