@@ -770,9 +770,21 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         }
     }
 
-    private fun initializeKirohaStorageIndex() {
+    private var kirohaStorageIndexJob: kotlinx.coroutines.Job? = null
+
+    /** Manual full reindex from Library; startup scans are rate limited independently. */
+    fun requestKirohaDownloadReindex() {
+        initializeKirohaStorageIndex(force = true)
+    }
+
+    private fun initializeKirohaStorageIndex(force: Boolean = false) {
+        val preferences = getSharedPreferences("kiroha_storage_index", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        // A full SAF tree walk on *every* process start competes with Browse/downloads.
+        if (!force && now - preferences.getLong("last_completed_at", 0L) < 12 * 60 * 60 * 1000L) return
+        if (kirohaStorageIndexJob?.isActive == true) return
         val device = DeviceRegistry(AndroidKeyValueStore(this)).load() ?: return
-        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+        kirohaStorageIndexJob = ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             val activeRoot = storageManager.getDownloadsDirectory()
             val providers = buildList {
                 activeRoot?.let { root ->
@@ -803,6 +815,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     )
                 }
             }
+            preferences.edit().putLong("last_completed_at", System.currentTimeMillis()).apply()
         }
     }
 
