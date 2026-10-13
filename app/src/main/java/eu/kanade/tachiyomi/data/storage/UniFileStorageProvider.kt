@@ -50,6 +50,22 @@ class UniFileStorageProvider(
         )
     }
 
+    override fun legacyFingerprint(relativePath: String): String? {
+        val file = find(relativePath) ?: return null
+        val digest = MessageDigest.getInstance("SHA-256")
+        fun visitMetadata(current: UniFile, prefix: String) {
+            if (current.isDirectory) {
+                current.listFiles().orEmpty().sortedBy { it.name.orEmpty() }.forEach {
+                    visitMetadata(it, "$prefix/${it.name.orEmpty()}")
+                }
+            } else {
+                digest.update("$prefix:${current.length()}".toByteArray())
+            }
+        }
+        visitMetadata(file, file.name.orEmpty())
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun visit(file: UniFile, prefix: String, digest: MessageDigest) {
         if (file.isDirectory) {
             file.listFiles().orEmpty().sortedBy { it.name.orEmpty() }.forEach {
