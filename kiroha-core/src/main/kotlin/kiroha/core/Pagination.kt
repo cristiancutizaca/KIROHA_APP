@@ -2,25 +2,27 @@ package kiroha.core
 
 data class PageDeduplication<T>(val items: List<T>, val hasNext: Boolean, val duplicatesRemoved: Int)
 
-/** Stateful per-PagingSource guard against repeated extension pages. */
-class PageDeduplicator<T>(
-    private val canonicalKey: (T) -> String,
-    private val maxDuplicateOnlyPages: Int = 6,
-) {
+/**
+ * Only the extension is authoritative about whether a next page exists.
+ * Skipping repeated/empty pages is handled by SourcePagingSource, which has
+ * an explicit bounded request budget and surfaces errors instead of silently
+ * discarding later unique pages.
+ */
+class PageDeduplicator<T>(private val canonicalKey: (T) -> String) {
     private val seen = hashSetOf<String>()
-    private var duplicateOnlyPages = 0
 
     fun accept(items: Iterable<T>, hasNextPage: Boolean): PageDeduplication<T> {
-        val incoming = items.toList()
-        val unique = incoming.filter { item ->
-            val key = canonicalKey(item).trim()
-            key.isNotEmpty() && seen.add(key)
+        var removed = 0
+        val unique = buildList {
+            for (item in items) {
+                val key = canonicalKey(item).trim()
+                if (key.isNotEmpty() && seen.add(key)) {
+                    add(item)
+                } else {
+                    removed++
+                }
+            }
         }
-        duplicateOnlyPages = if (unique.isEmpty()) duplicateOnlyPages + 1 else 0
-        return PageDeduplication(
-            items = unique,
-            hasNext = hasNextPage && duplicateOnlyPages < maxDuplicateOnlyPages,
-            duplicatesRemoved = incoming.size - unique.size,
-        )
+        return PageDeduplication(unique, hasNextPage, removed)
     }
 }
