@@ -5,9 +5,8 @@ import androidx.core.content.edit
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.data.download.anime.model.AnimeDownload
-import kotlinx.coroutines.runBlocking
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import tachiyomi.domain.entries.anime.interactor.GetAnime
@@ -16,7 +15,11 @@ import tachiyomi.domain.items.episode.interactor.GetEpisode
 import tachiyomi.domain.source.anime.service.AnimeSourceManager
 
 /**
- * This class is used to persist active downloads across application restarts.
+ * Durable anime queue snapshots. Manga and anime historically shared numeric preference keys,
+ * allowing an episode to overwrite a chapter with the same database ID. Keys are now namespaced.
+ *
+ * Restore is non-destructive: missing sources or a process crash must not erase queued work.
+ * Legacy numeric records are migrated only when they deserialize as anime entries.
  */
 @Inject
 @SingleIn(AppScope::class)
@@ -27,125 +30,112 @@ class AnimeDownloadStore(
     private val getAnime: GetAnime,
     private val getEpisode: GetEpisode,
 ) {
-
-    /**
-     * Preference file where active downloads are stored.
-     */
     private val preferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
-
-    /**
-     * Counter used to keep the queue order.
-     */
+    private val prefix = "anime:"
+    private val pausedKey = "anime:queue_paused"
     private var counter = 0
 
-    /**
-     * Adds a list of downloads to the store.
-     *
-     * @param downloads the list of downloads to add.
-     */
+    private fun getKey(download: AnimeDownload): String = "$prefix${download.episode.id}"
+
+    /** Commit queue changes before reporting them to the UI, including after unexpected process death. */
+    @Synchronized
     fun addAll(downloads: List<AnimeDownload>) {
-        preferences.edit {
+        if (downloads.isEmpty()) return
+        preferences.edit(commit = true) {
             downloads.forEach { putString(getKey(it), serialize(it)) }
         }
     }
 
-    /**
-     * Removes a download from the store.
-     *
-     * @param download the download to remove.
-     */
+    @Synchronized
     fun remove(download: AnimeDownload) {
-        preferences.edit {
-            remove(getKey(download))
-        }
+        preferences.edit(commit = true) { remove(getKey(download)) }
     }
 
-    /**
-     * Removes a list of downloads from the store.
-     *
-     * @param downloads the download to remove.
-     */
+    @Synchronized
     fun removeAll(downloads: List<AnimeDownload>) {
-        preferences.edit {
+        preferences.edit(commit = true) {
             downloads.forEach { remove(getKey(it)) }
         }
     }
 
-    /**
-     * Removes all the downloads from the store.
-     */
-    fun clear() {
-        preferences.edit {
-            clear()
+    /** Replace only this media type's entries, atomically, without deleting the other queue. */
+    @Synchronized
+    fun replaceAll(downloads: List<AnimeDownload>) {
+        preferences.edit(commit = true) {
+            preferences.all.forEach { (key, raw) ->
+                if (key.startsWith(prefix) && key != pausedKey ||
+                    key.toLongOrNull() != null && (raw as? String)?.let(::deserialize) != null
+                ) {
+                    remove(key)
+                }
+            }
+            downloads.forEach { putString(getKey(it), serialize(it)) }
         }
     }
 
-    /**
-     * Returns the preference's key for the given download.
-     *
-     * @param download the download.
-     */
-    private fun getKey(download: AnimeDownload): String {
-        return download.episode.id.toString()
+    @Synchronized
+    fun clear() = replaceAll(emptyList())
+
+    fun isPaused(): Boolean = preferences.getBoolean(pausedKey, false)
+
+    fun setPaused(paused: Boolean) {
+        preferences.edit(commit = true) { putBoolean(pausedKey, paused) }
     }
 
-    /**
-     * Returns the list of downloads to restore. It should be called in a background thread.
-     */
-    fun restore(): List<AnimeDownload> {
-        val objs = preferences.all
-            .mapNotNull { it.value as? String }
-            .mapNotNull { deserialize(it) }
-            .sortedBy { it.order }
-
-        val downloads = mutableListOf<AnimeDownload>()
-        if (objs.isNotEmpty()) {
-            val cachedAnime = mutableMapOf<Long, Anime?>()
-            for ((animeId, episodeId) in objs) {
-                val anime = cachedAnime.getOrPut(animeId) {
-                    runBlocking { getAnime.await(animeId) }
-                } ?: continue
-                val source = sourceManager.get(anime.source) as? AnimeHttpSource ?: continue
-                val episode = runBlocking { getEpisode.await(episodeId) } ?: continue
-                downloads.add(AnimeDownload(source, anime, episode))
+    suspend fun restore(): List<AnimeDownload> {
+        val snapshots = preferences.all.mapNotNull { (key, raw) ->
+            if (!key.startsWith(prefix) && key.toLongOrNull() == null) return@mapNotNull null
+            val encoded = raw as? String ?: return@mapNotNull null
+            val item = deserialize(encoded) ?: return@mapNotNull null
+            key to (encoded to item)
+        }
+        // Prefer an already migrated record over an old numeric key for the same item.
+        val ordered = snapshots.sortedWith(
+            compareBy<Pair<String, Pair<String, AnimeDownloadObject>>> { it.first.toLongOrNull() != null }
+                .thenBy { it.second.second.order },
+        ).distinctBy { it.second.second.episodeId }
+        counter = maxOf(counter, (ordered.maxOfOrNull { it.second.second.order } ?: -1) + 1)
+        // Upgrade legacy entries in a single durable edit. Never clear all entries on restore.
+        val legacy = ordered.filter { it.first.toLongOrNull() != null }
+        if (legacy.isNotEmpty()) {
+            preferences.edit(commit = true) {
+                legacy.forEach { (key, value) ->
+                    val (raw, item) = value
+                    val newKey = "$prefix${item.episodeId}"
+                    if (!preferences.contains(newKey)) putString(newKey, raw)
+                    remove(key)
+                }
             }
         }
 
-        // Clear the store, downloads will be added again immediately.
-        clear()
-        return downloads
+        val parents = mutableMapOf<Long, Anime?>()
+        val restored = mutableListOf<AnimeDownload>()
+        for ((_, value) in ordered.sortedBy { it.second.second.order }) {
+            val item = value.second
+            val parent = parents.getOrPut(item.animeId) {
+                getAnime.await(item.animeId)
+            } ?: continue
+            val source = sourceManager.get(parent.source) as? AnimeHttpSource ?: continue
+            val child = getEpisode.await(item.episodeId) ?: continue
+            if (child.animeId != parent.id) continue
+            restored.add(AnimeDownload(source, parent, child))
+        }
+        return restored
     }
 
-    /**
-     * Converts a download to a string.
-     *
-     * @param download the download to serialize.
-     */
     private fun serialize(download: AnimeDownload): String {
-        val obj = AnimeDownloadObject(download.anime.id, download.episode.id, counter++)
-        return json.encodeToString(obj)
+        return json.encodeToString(
+            AnimeDownloadObject(download.anime.id, download.episode.id, counter++),
+        )
     }
 
-    /**
-     * Restore a download from a string.
-     *
-     * @param string the download as string.
-     */
-    private fun deserialize(string: String): AnimeDownloadObject? {
-        return try {
-            json.decodeFromString<AnimeDownloadObject>(string)
-        } catch (e: Exception) {
+    private fun deserialize(value: String): AnimeDownloadObject? =
+        try {
+            json.decodeFromString<AnimeDownloadObject>(value)
+        } catch (_: Exception) {
             null
         }
-    }
 }
 
-/**
- * Class used for download serialization
- *
- * @param animeId the id of the anime.
- * @param episodeId the id of the episode.
- * @param order the order of the download in the queue.
- */
 @Serializable
 private data class AnimeDownloadObject(val animeId: Long, val episodeId: Long, val order: Int)
