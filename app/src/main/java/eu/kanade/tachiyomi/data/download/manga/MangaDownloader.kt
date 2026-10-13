@@ -402,6 +402,14 @@ class MangaDownloader(
 
             download.status = MangaDownload.State.DOWNLOADING
 
+            // Snapshot existing completed pages ONCE per chapter. The previous
+            // getOrDownloadImage() called listFiles() for every page, resulting in
+            // quadratic SAF directory scans on long chapters.
+            val existingImages = tmpDir.listFiles().orEmpty()
+                .asSequence()
+                .filter { it.isFile && it.name?.endsWith(".tmp") != true }
+                .groupBy { file -> file.name.orEmpty().substringBefore('.').substringBefore("__") }
+
             // Start downloading images, consider we can have downloaded images already
             // A few chapters can fetch many pages concurrently; throttle per chapter
             // when the OS reports a hot device instead of multiplying socket load.
@@ -418,7 +426,7 @@ class MangaDownloader(
                             }
                         }
 
-                        withIOContext { getOrDownloadImage(page, download, tmpDir, dataSaver) }
+                        withIOContext { getOrDownloadImage(page, download, tmpDir, dataSaver, existingImages) }
                         emit(page)
                     }.flowOn(Dispatchers.IO)
                 }
@@ -472,6 +480,7 @@ class MangaDownloader(
         download: MangaDownload,
         tmpDir: UniFile,
         dataSaver: DataSaver,
+        existingImages: Map<String, List<UniFile>>,
     ) {
         // If the image URL is empty, do nothing
         if (page.imageUrl == null) {
@@ -481,9 +490,9 @@ class MangaDownloader(
         val digitCount = (download.pages?.size ?: 0).toString().length.coerceAtLeast(3)
         val filename = "%0${digitCount}d".format(Locale.ENGLISH, page.number)
 
-        // Try to find the image file
-        val imageFile = tmpDir.listFiles()?.firstOrNull {
-            isDownloadedPageImage(it.name ?: return@firstOrNull false, filename)
+        // An indexed lookup avoids scanning the SAF folder again for each page.
+        val imageFile = existingImages[filename]?.firstOrNull {
+            isDownloadedPageImage(it.name.orEmpty(), filename)
         }
 
         try {
