@@ -20,6 +20,7 @@ import eu.kanade.tachiyomi.util.system.networkStateFlow
 import eu.kanade.tachiyomi.util.system.notificationBuilder
 import eu.kanade.tachiyomi.util.system.setForegroundSafely
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combineTransform
 import kotlinx.coroutines.flow.launchIn
@@ -62,34 +63,41 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
     }
 
     override suspend fun doWork(): Result {
+        // The downloader restores its queue asynchronously. Without this barrier,
+        // a worker scheduled after process death could see an empty in-memory queue.
+        downloadManager.awaitQueueRestoration()
         var networkCheck = checkNetworkState(
             applicationContext.activeNetworkState(),
             downloadPreferences.downloadOnlyOverWifi.get(),
         )
-        var active = networkCheck && downloadManager.downloaderStart()
-
-        if (!active) {
-            return Result.failure()
+        if (!networkCheck) {
+            return if (downloadManager.queueState.value.isNotEmpty()) Result.retry() else Result.success()
         }
+        if (!downloadManager.downloaderStart()) return Result.success()
 
         setForegroundSafely()
 
-        coroutineScope {
-            combineTransform(
+        return coroutineScope {
+            val networkMonitor = combineTransform(
                 applicationContext.networkStateFlow(),
                 downloadPreferences.downloadOnlyOverWifi.changes(),
-                transform = { a, b -> emit(checkNetworkState(a, b)) },
+                transform = { state, wifiOnly -> emit(checkNetworkState(state, wifiOnly)) },
             )
                 .onEach { networkCheck = it }
                 .launchIn(this)
+            try {
+                // Suspending wait, not a busy spin or an indefinitely joined monitoring scope.
+                while (!isStopped && downloadManager.isRunning && networkCheck) {
+                    delay(500L)
+                }
+                Result.success()
+            } finally {
+                networkMonitor.cancel()
+                if (isStopped && downloadManager.isRunning) {
+                    downloadManager.downloaderStop()
+                }
+            }
         }
-
-        // Keep the worker running when needed
-        while (active) {
-            active = !isStopped && downloadManager.isRunning && networkCheck
-        }
-
-        return Result.success()
     }
 
     private fun checkNetworkState(state: NetworkState, requireWifi: Boolean): Boolean {
@@ -115,7 +123,7 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
                 .addTag(TAG)
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniqueWork(TAG, ExistingWorkPolicy.REPLACE, request)
+                .enqueueUniqueWork(TAG, ExistingWorkPolicy.KEEP, request)
         }
 
         fun stop(context: Context) {
