@@ -102,14 +102,17 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun `pagination stops after two duplicate-only pages`() {
+    fun `pagination preserves source continuation through duplicate pages`() {
         val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
         deduplicator.accept(listOf("A", "B"), true)
         val duplicatePage = deduplicator.accept(listOf("A", "B"), true)
-        val loopPage = deduplicator.accept(listOf("A", "B"), true)
+        val anotherDuplicatePage = deduplicator.accept(listOf("A", "B"), true)
+        val laterUniquePage = deduplicator.accept(listOf("C", "D"), false)
         assertTrue(duplicatePage.hasNext)
-        assertFalse(loopPage.hasNext)
-        assertEquals(2, loopPage.duplicatesRemoved)
+        assertTrue(anotherDuplicatePage.hasNext)
+        assertEquals(2, anotherDuplicatePage.duplicatesRemoved)
+        assertEquals(listOf("C", "D"), laterUniquePage.items)
+        assertFalse(laterUniquePage.hasNext)
     }
 
     @Test
