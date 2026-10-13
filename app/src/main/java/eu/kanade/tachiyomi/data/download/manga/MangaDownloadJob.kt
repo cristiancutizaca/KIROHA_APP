@@ -5,6 +5,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.lifecycle.asFlow
 import androidx.work.CoroutineWorker
+import androidx.work.Constraints
+import androidx.work.NetworkType
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
@@ -90,7 +92,12 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
                 while (!isStopped && downloadManager.isRunning && networkCheck) {
                     delay(500L)
                 }
-                Result.success()
+                // Offline interruptions preserve the queue and reschedule pending work.
+                if (!networkCheck && downloadManager.queueState.value.isNotEmpty()) {
+                    Result.retry()
+                } else {
+                    Result.success()
+                }
             } finally {
                 networkMonitor.cancel()
                 if (isStopped && downloadManager.isRunning) {
@@ -120,6 +127,7 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
 
         fun start(context: Context) {
             val request = OneTimeWorkRequestBuilder<MangaDownloadJob>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .addTag(TAG)
                 .build()
             WorkManager.getInstance(context)
