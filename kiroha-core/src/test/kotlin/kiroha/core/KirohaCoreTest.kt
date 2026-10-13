@@ -113,15 +113,15 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun `pagination stops after six consecutive duplicate-only pages`() {
+    fun `pagination never claims exhaustion while a source has more pages`() {
         val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
         deduplicator.accept(listOf("A", "B"), true)
-        repeat(5) {
+        repeat(12) {
             assertTrue(deduplicator.accept(listOf("A", "B"), true).hasNext)
         }
-        val lastDuplicate = deduplicator.accept(listOf("A", "B"), true)
-        assertFalse(lastDuplicate.hasNext)
-        assertEquals(2, lastDuplicate.duplicatesRemoved)
+        val lateUnique = deduplicator.accept(listOf("C"), false)
+        assertEquals(listOf("C"), lateUnique.items)
+        assertFalse(lateUnique.hasNext)
     }
 
     @Test
