@@ -212,6 +212,24 @@ class KirohaCoreTest {
     }
 
     @Test
+    fun `reconciler migrates matching legacy checksum instead of marking download corrupt`() {
+        val root = Files.createTempDirectory("kiroha-legacy-upgrade")
+        val underlying = InternalStorageProvider("internal", root)
+        underlying.write("chapters/one.bin").use { it.write(byteArrayOf(1, 2, 3)) }
+        val legacy = object : StorageProvider by underlying {
+            override fun legacyFingerprint(relativePath: String): String = "old-checksum"
+        }
+        val oldRecord = DownloadRecord(
+            "entry-1", "phone-a", "internal", DownloadAvailability.AVAILABLE_LOCAL,
+            true, "chapters/one.bin", checksum = "old-checksum",
+        )
+        val verified = DownloadReconciler.reconcile(oldRecord, legacy, 100L)
+        assertEquals(DownloadAvailability.AVAILABLE_LOCAL, verified.state)
+        assertEquals(underlying.fingerprint("chapters/one.bin").value, verified.checksum)
+        assertNotEquals("old-checksum", verified.checksum)
+    }
+
+    @Test
     fun `reconciler distinguishes unavailable storage from missing file`() {
         val root = Files.createTempDirectory("kiroha-storage")
         val provider = InternalStorageProvider("internal", root)
