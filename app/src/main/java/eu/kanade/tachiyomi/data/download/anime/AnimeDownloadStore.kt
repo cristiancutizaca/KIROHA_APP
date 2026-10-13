@@ -34,6 +34,13 @@ class AnimeDownloadStore(
     private val preferences = context.getSharedPreferences("active_anime_downloads", Context.MODE_PRIVATE)
     private val legacyPreferences = context.getSharedPreferences("active_downloads", Context.MODE_PRIVATE)
     private val legacyMigrationKey = "legacy_anime_queue_migrated"
+    private val pausedKey = "anime_queue_paused"
+
+    fun isPaused(): Boolean = preferences.getBoolean(pausedKey, false)
+
+    fun setPaused(paused: Boolean) {
+        preferences.edit(commit = true) { putBoolean(pausedKey, paused) }
+    }
 
     /**
      * Counter used to keep the queue order.
