@@ -951,8 +951,10 @@ class AnimeDownloader(
         val wasRunning = isRunning
 
         pause()
-        internalClearQueue()
-        addAllToQueue(downloads)
+        downloads.forEach { it.status = AnimeDownload.State.QUEUE }
+        // A two-step clear + add can permanently erase queued work on process death.
+        store.replaceAll(downloads)
+        _queueState.value = downloads.distinctBy { it.episode.id }
 
         if (wasRunning) {
             start()
