@@ -414,8 +414,14 @@ class MangaDownloader(
             pageList.asFlow()
                 .flatMapMerge(concurrency = if (thermalChapterLimit() == 1) 1 else 2) { page ->
                     flow {
-                        // Fetch image URL if necessary
-                        if (page.imageUrl.isNullOrEmpty()) {
+                        // Keep completed images offline: do not call the extension
+                        // for image URLs that already exist in the restored temp folder.
+                        val digits = pageList.size.toString().length.coerceAtLeast(3)
+                        val prefix = "%0${digits}d".format(Locale.ENGLISH, page.number)
+                        val alreadySaved = existingImages[prefix]?.any {
+                            isDownloadedPageImage(it.name.orEmpty(), prefix)
+                        } == true
+                        if (!alreadySaved && page.imageUrl.isNullOrEmpty()) {
                             page.status = Page.State.LOAD_PAGE
                             try {
                                 page.imageUrl = download.source.getImageUrl(page)
@@ -480,11 +486,6 @@ class MangaDownloader(
         dataSaver: DataSaver,
         existingImages: Map<String, List<UniFile>>,
     ) {
-        // If the image URL is empty, do nothing
-        if (page.imageUrl == null) {
-            return
-        }
-
         val digitCount = (download.pages?.size ?: 0).toString().length.coerceAtLeast(3)
         val filename = "%0${digitCount}d".format(Locale.ENGLISH, page.number)
 
@@ -492,6 +493,10 @@ class MangaDownloader(
         val imageFile = existingImages[filename]?.firstOrNull {
             isDownloadedPageImage(it.name.orEmpty(), filename)
         }
+
+        // A saved page is valid without a freshly fetched image URL. Only pages
+        // that are still missing require the source to provide one.
+        if (imageFile == null && page.imageUrl.isNullOrEmpty()) return
 
         try {
             // If the image is already downloaded, do nothing. Otherwise download from network
