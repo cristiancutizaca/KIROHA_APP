@@ -123,11 +123,13 @@ class MangaDownloader(
     @Volatile
     var isPaused: Boolean = false
 
-    init {
-        scope.launch {
-            val chapters = async { store.restore() }
-            addAllToQueue(chapters.await())
-        }
+    // The worker must wait for on-disk queue restoration before deciding it is empty.
+    private val restorationJob: Job = scope.launch {
+        addAllToQueue(store.restore())
+    }
+
+    suspend fun awaitRestoration() {
+        restorationJob.join()
     }
 
     /**
@@ -708,12 +710,14 @@ class MangaDownloader(
     }
 
     private fun addAllToQueue(downloads: List<MangaDownload>) {
-        _queueState.update {
-            downloads.forEach { download ->
-                download.status = MangaDownload.State.QUEUE
-            }
-            store.addAll(downloads)
-            it + downloads
+        if (downloads.isEmpty()) return
+        _queueState.update { current ->
+            val existingIds = current.mapTo(hashSetOf()) { it.chapter.id }
+            val newDownloads = downloads.filter { existingIds.add(it.chapter.id) }
+            newDownloads.forEach { it.status = MangaDownload.State.QUEUE }
+            // Persist before publishing new queue state. Never replace the saved queue on restore.
+            store.addAll(newDownloads)
+            current + newDownloads
         }
     }
 
