@@ -772,7 +772,17 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     private fun initializeKirohaStorageIndex() {
         val device = DeviceRegistry(AndroidKeyValueStore(this)).load() ?: return
+        val indexPrefs = getSharedPreferences("kiroha_storage_index", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        // A full filesystem reconciliation on every launch competes with browsing,
+        // restoring libraries and active downloads, and was heating up slower phones.
+        if (now - indexPrefs.getLong("last_reconcile_at", 0L) < 24 * 60 * 60 * 1_000L) return
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(45_000L)
+            // Never start a full filesystem walk while downloads are already queued.
+            if (mangaDownloadManager.queueState.value.isNotEmpty() ||
+                animeDownloadManager.queueState.value.isNotEmpty()
+            ) return@launch
             val activeRoot = storageManager.getDownloadsDirectory()
             val providers = buildList {
                 activeRoot?.let { root ->
@@ -803,6 +813,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     )
                 }
             }
+            indexPrefs.edit().putLong("last_reconcile_at", System.currentTimeMillis()).apply()
         }
     }
 
@@ -823,6 +834,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     private suspend fun persistKirohaMangaDownload(deviceId: String, download: MangaDownload) {
+        // QUEUED and DOWNLOADING are work states, not available remote copies.
+        // Avoid scanning/fingerprinting the chapter folder on every status update.
+        if (download.status != MangaDownload.State.DOWNLOADED) return
         val now = System.currentTimeMillis()
         val sourceNamespace = download.source.id.toString()
         val canonicalId = download.chapter.url
@@ -868,6 +882,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     private suspend fun persistKirohaAnimeDownload(deviceId: String, download: AnimeDownload) {
+        if (download.status != AnimeDownload.State.DOWNLOADED) return
         val now = System.currentTimeMillis()
         val sourceNamespace = download.source.id.toString()
         val canonicalId = download.episode.url
