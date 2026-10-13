@@ -369,50 +369,46 @@ class BrowseAnimeSourceViewModel(
      *
      * @param anime the anime to update.
      */
-    fun changeAnimeFavorite(anime: Anime) {
-        viewModelScope.launch {
-            var new = anime.copy(
-                favorite = !anime.favorite,
-                dateAdded = when (anime.favorite) {
-                    true -> 0
-                    false -> Instant.now().toEpochMilli()
-                },
-            )
+    // Keep a single observable category snapshot instead of opening a new DB flow on
+    // every favorite tap. Category changes automatically invalidate the cached list.
+    private val cachedUserCategories = getCategories.subscribe()
+        .map { all -> all.filterNot { it.isSystemCategory } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-            if (!new.favorite) {
-                new = new.removeCovers(coverCache)
-                new = new.removeBackgrounds(backgroundCache)
-            } else {
-                setAnimeDefaultEpisodeFlags.await(anime)
-                addTracks.bindEnhancedTrackers(anime, source)
-            }
-
-            updateAnime.await(new.toAnimeUpdate())
+    private suspend fun updateAnimeFavorite(anime: Anime) {
+        var new = anime.copy(
+            favorite = !anime.favorite,
+            dateAdded = if (anime.favorite) 0 else Instant.now().toEpochMilli(),
+        )
+        if (!new.favorite) {
+            new = new.removeCovers(coverCache)
+            new = new.removeBackgrounds(backgroundCache)
+        } else {
+            setAnimeDefaultEpisodeFlags.await(anime)
+            addTracks.bindEnhancedTrackers(anime, source)
         }
+        updateAnime.await(new.toAnimeUpdate())
+    }
+
+    fun changeAnimeFavorite(anime: Anime) {
+        viewModelScope.launchIO { updateAnimeFavorite(anime) }
     }
 
     fun addFavorite(anime: Anime) {
-        viewModelScope.launch {
+        viewModelScope.launchIO {
             val categories = getCategories()
             val defaultCategoryId = libraryPreferences.defaultAnimeCategory.get()
-            val defaultCategory = categories.find { it.id == defaultCategoryId.toLong() }
-
+            val selected = categories.find { it.id == defaultCategoryId.toLong() }
             when {
-                // Default category set
-                defaultCategory != null -> {
-                    moveAnimeToCategories(anime, defaultCategory)
-
-                    changeAnimeFavorite(anime)
+                selected != null || defaultCategoryId == 0 || categories.isEmpty() -> {
+                    // Commit the category assignment before publishing the favorite update.
+                    // Two independent launched coroutines previously raced on every addition.
+                    setAnimeCategories.await(
+                        animeId = anime.id,
+                        categoryIds = selected?.let { listOf(it.id) }.orEmpty(),
+                    )
+                    updateAnimeFavorite(anime)
                 }
-
-                // Automatic 'Default' or no categories
-                defaultCategoryId == 0 || categories.isEmpty() -> {
-                    moveAnimeToCategories(anime)
-
-                    changeAnimeFavorite(anime)
-                }
-
-                // Choose a category
                 else -> {
                     val preselectedIds = getCategories.await(anime.id).map { it.id }
                     setDialog(
@@ -426,16 +422,10 @@ class BrowseAnimeSourceViewModel(
         }
     }
 
-    /**
-     * Get user categories.
-     *
-     * @return List of categories, not including the default category
-     */
+    /** Cached for rapid repeated additions; fall back to DB while first snapshot loads. */
     suspend fun getCategories(): List<Category> {
-        return getCategories.subscribe()
-            .firstOrNull()
-            ?.filterNot { it.isSystemCategory }
-            .orEmpty()
+        return cachedUserCategories.value.takeIf { it.isNotEmpty() }
+            ?: getCategories.await().filterNot { it.isSystemCategory }
     }
 
     suspend fun getDuplicateAnimelibAnime(anime: Anime): Anime? {
