@@ -249,49 +249,45 @@ class BrowseMangaSourceViewModel(
      *
      * @param manga the manga to update.
      */
-    fun changeMangaFavorite(manga: Manga) {
-        viewModelScope.launch {
-            var new = manga.copy(
-                favorite = !manga.favorite,
-                dateAdded = when (manga.favorite) {
-                    true -> 0
-                    false -> Clock.System.now().toEpochMilliseconds()
-                },
-            )
+    // Keep a single observable category snapshot instead of opening a new DB flow on
+    // every favorite tap. Category changes automatically invalidate the cached list.
+    private val cachedUserCategories = getCategories.subscribe()
+        .map { all -> all.filterNot { it.isSystemCategory } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-            if (!new.favorite) {
-                new = new.removeCovers(coverCache)
-            } else {
-                setMangaDefaultChapterFlags.await(manga)
-                addTracks.bindEnhancedTrackers(manga, source)
-            }
-
-            updateManga.await(new.toMangaUpdate())
+    private suspend fun updateMangaFavorite(manga: Manga) {
+        var new = manga.copy(
+            favorite = !manga.favorite,
+            dateAdded = if (manga.favorite) 0 else Clock.System.now().toEpochMilliseconds(),
+        )
+        if (!new.favorite) {
+            new = new.removeCovers(coverCache)
+        } else {
+            setMangaDefaultChapterFlags.await(manga)
+            addTracks.bindEnhancedTrackers(manga, source)
         }
+        updateManga.await(new.toMangaUpdate())
+    }
+
+    fun changeMangaFavorite(manga: Manga) {
+        viewModelScope.launchIO { updateMangaFavorite(manga) }
     }
 
     fun addFavorite(manga: Manga) {
-        viewModelScope.launch {
+        viewModelScope.launchIO {
             val categories = getCategories()
             val defaultCategoryId = libraryPreferences.defaultCategory.get()
-            val defaultCategory = categories.find { it.id == defaultCategoryId.toLong() }
-
+            val selected = categories.find { it.id == defaultCategoryId.toLong() }
             when {
-                // Default category set
-                defaultCategory != null -> {
-                    moveMangaToCategories(manga, defaultCategory)
-
-                    changeMangaFavorite(manga)
+                selected != null || defaultCategoryId == 0 || categories.isEmpty() -> {
+                    // Commit the category assignment before publishing the favorite update.
+                    // Two independent launched coroutines previously raced on every addition.
+                    setMangaCategories.await(
+                        mangaId = manga.id,
+                        categoryIds = selected?.let { listOf(it.id) }.orEmpty(),
+                    )
+                    updateMangaFavorite(manga)
                 }
-
-                // Automatic 'Default' or no categories
-                defaultCategoryId == 0 || categories.isEmpty() -> {
-                    moveMangaToCategories(manga)
-
-                    changeMangaFavorite(manga)
-                }
-
-                // Choose a category
                 else -> {
                     val preselectedIds = getCategories.await(manga.id).map { it.id }
                     setDialog(
@@ -305,16 +301,10 @@ class BrowseMangaSourceViewModel(
         }
     }
 
-    /**
-     * Get user categories.
-     *
-     * @return List of categories, not including the default category
-     */
+    /** Cached for rapid repeated additions; fall back to DB while first snapshot loads. */
     suspend fun getCategories(): List<Category> {
-        return getCategories.subscribe()
-            .firstOrNull()
-            ?.filterNot { it.isSystemCategory }
-            .orEmpty()
+        return cachedUserCategories.value.takeIf { it.isNotEmpty() }
+            ?: getCategories.await().filterNot { it.isSystemCategory }
     }
 
     suspend fun getDuplicateLibraryManga(manga: Manga): Manga? {
