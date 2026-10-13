@@ -117,8 +117,13 @@ class AnimeDownloader(
 
     init {
         scope.launch {
-            val episodes = async { store.restore() }
-            addAllToQueue(episodes.await())
+            // Restore without deleting the persisted queue. Enqueues may arrive during startup,
+            // so merge by stable local item ID rather than overwriting current state.
+            val restored = store.restore()
+            restored.forEach { it.status = AnimeDownload.State.QUEUE }
+            _queueState.update { current ->
+                (restored + current).distinctBy { it.episode.id }
+            }
         }
     }
 
@@ -136,6 +141,7 @@ class AnimeDownloader(
         val pending = queueState.value.filter { it.status != AnimeDownload.State.DOWNLOADED }
         pending.forEach { if (it.status != AnimeDownload.State.QUEUE) it.status = AnimeDownload.State.QUEUE }
 
+        store.setPaused(false)
         launchDownloaderJob()
 
         return pending.isNotEmpty()
@@ -172,6 +178,7 @@ class AnimeDownloader(
         queueState.value
             .filter { it.status == AnimeDownload.State.DOWNLOADING }
             .forEach { it.status = AnimeDownload.State.QUEUE }
+        store.setPaused(true)
     }
 
     /**
@@ -281,6 +288,7 @@ class AnimeDownloader(
 
         val source = sourceManager.get(anime.source) as? AnimeHttpSource ?: return
         val wasEmpty = queueState.value.isEmpty()
+        val queuedIds = queueState.value.mapTo(hashSetOf()) { it.episode.id }
 
         val episodesToQueue = episodes.asSequence()
             // Filter out those already downloaded.
@@ -288,7 +296,7 @@ class AnimeDownloader(
             // Add episodes to queue from the start.
             .sortedByDescending { it.sourceOrder }
             // Filter out those already enqueued.
-            .filter { episode -> queueState.value.none { it.episode.id == episode.id } }
+            .filter { episode -> episode.id !in queuedIds }
             // Create a download for each one.
             .map { AnimeDownload(source, anime, it, changeDownloader, video) }
             .toList()
@@ -879,38 +887,39 @@ class AnimeDownloader(
     }
 
     private fun addAllToQueue(downloads: List<AnimeDownload>) {
-        _queueState.update {
-            downloads.forEach { download ->
-                download.status = AnimeDownload.State.QUEUE
-            }
-            store.addAll(downloads)
-            it + downloads
+        if (downloads.isEmpty()) return
+        downloads.forEach { it.status = AnimeDownload.State.QUEUE }
+        // Persist before publishing: a process death must not lose an acknowledged enqueue.
+        store.addAll(downloads)
+        _queueState.update { current ->
+            val existingIds = current.mapTo(hashSetOf()) { it.episode.id }
+            current + downloads.filter { existingIds.add(it.episode.id) }
         }
     }
 
     private fun removeFromQueue(download: AnimeDownload) {
-        _queueState.update {
-            store.remove(download)
-            if (download.status == AnimeDownload.State.DOWNLOADING || download.status == AnimeDownload.State.QUEUE) {
-                download.status = AnimeDownload.State.NOT_DOWNLOADED
-            }
-            it - download
+        store.remove(download)
+        if (download.status == AnimeDownload.State.DOWNLOADING ||
+            download.status == AnimeDownload.State.QUEUE
+        ) {
+            download.status = AnimeDownload.State.NOT_DOWNLOADED
         }
+        _queueState.update { it - download }
     }
 
     private inline fun removeFromQueueIf(predicate: (AnimeDownload) -> Boolean) {
-        _queueState.update { queue ->
-            val downloads = queue.filter { predicate(it) }
-            store.removeAll(downloads)
-            downloads.forEach { download ->
-                if (download.status == AnimeDownload.State.DOWNLOADING ||
-                    download.status == AnimeDownload.State.QUEUE
-                ) {
-                    download.status = AnimeDownload.State.NOT_DOWNLOADED
-                }
+        val downloads = queueState.value.filter(predicate)
+        if (downloads.isEmpty()) return
+        store.removeAll(downloads)
+        downloads.forEach { download ->
+            if (download.status == AnimeDownload.State.DOWNLOADING ||
+                download.status == AnimeDownload.State.QUEUE
+            ) {
+                download.status = AnimeDownload.State.NOT_DOWNLOADED
             }
-            queue - downloads.toSet()
         }
+        val removed = downloads.toSet()
+        _queueState.update { queue -> queue.filterNot { it in removed } }
     }
 
     fun removeFromQueue(episodes: List<Episode>) {
@@ -923,37 +932,35 @@ class AnimeDownloader(
     }
 
     private fun internalClearQueue() {
-        _queueState.update {
-            it.forEach { download ->
+        store.clear()
+        _queueState.update { previous ->
+            previous.forEach { download ->
                 if (download.status == AnimeDownload.State.DOWNLOADING ||
                     download.status == AnimeDownload.State.QUEUE
                 ) {
                     download.status = AnimeDownload.State.NOT_DOWNLOADED
                 }
             }
-            store.clear()
             emptyList()
         }
     }
 
     fun updateQueue(downloads: List<AnimeDownload>) {
-        if (queueState == downloads) return
-
+        val wasRunning = isRunning
         if (downloads.isEmpty()) {
             clearQueue()
             stop()
             return
         }
 
-        val wasRunning = isRunning
-
+        // Reorders must be committed atomically; clear() + addAll() loses the
+        // entire pending queue if Android kills the process between those calls.
         pause()
-        internalClearQueue()
-        addAllToQueue(downloads)
+        downloads.forEach { it.status = AnimeDownload.State.QUEUE }
+        store.replaceAll(downloads)
+        _queueState.value = downloads.distinctBy { it.episode.id }
 
-        if (wasRunning) {
-            start()
-        }
+        if (wasRunning) start()
     }
 
     companion object {
