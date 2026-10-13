@@ -1,78 +1,38 @@
-# Kiroha v0.1 — stabilization work-in-progress (merged into main)
+# Kiroha v0.1 — Candidate stabilization, aún NO certificada
 
-> **Not a release candidate.** This document records the secondary branch's prior work. The reviewed improvements have been selectively incorporated into `main` while keeping `main`'s queue storage, worker recovery and manual reindex approach. Compilation and real-device regression testing are still required.
+**Rama principal: `main`. Historial secundario fusionado con `main` como base y conflictos revisados.** La secundaria `fix/kiroha-v01-p0-reliability` permanece intacta; existe respaldo `backup/main-before-combine-20261013`.
 
-## Implemented in this branch
+## Implementación del código (no equivale a pruebas)
 
-- Manga and anime downloads now have distinct persisted keys (`manga:<chapterId>` and
-  `anime:<episodeId>`). Previously both types wrote numeric keys to the same
-  `active_downloads` SharedPreferences, allowing cross-type overwrites.
-- Legacy numeric records are migrated when their JSON representation matches the
-  media type. Restoration no longer empties the entire preference store, and
-  unresolved entries are retained rather than dropped.
-- Queue insertions are persisted before UI notification; queue reordering uses
-  one storage replacement instead of clear + re-add. Restored items are merged
-  into the current queue to avoid duplicating new startup enqueues.
-- Both source paging implementations can skip intermediate duplicate-only or
-  empty pages; after twelve nonproductive pages they surface a retryable paging
-  error instead of silently reporting the source as exhausted.
-- Deduplication remains based on canonical URL; titles and author names do not
-  define identity. Added a regression test for duplicate-only intermediary pages.
-- Browse no longer starts permanent eager database subscriptions for every loaded
-  card, and the initial paging load is bounded.
-- Category assignment UI uses lazy rows and stable keys.
-- Startup storage reconciliation is delayed and rate limited, and is skipped when
-  manga or anime downloads are queued. Kiroha download recorders only perform
-  expensive local file scans on completed items, not transient queue statuses.
-- Exceptions in asynchronous startup indexing / recorder callbacks are logged
-  without crashing the whole application (cancellation is still propagated).
+- Identidad Android y SQLDelight async preservados.
+- Cola de manga/anime aislada, migración legado, pausa y orden persistidos, restauración no destructiva, arranque/reintento por WorkManager.
+- Descarga por capítulos mantiene `.tmp`, reusa archivos finalizados y deja de releer la carpeta por página. Descargas simultáneas limitadas por preferencia/temperatura Android.
+- Paginación manga/anime con dedup por URL y páginas intermedias, límite de fuente rota y precarga; menos suscripciones de BD por tarjeta invisible.
+- Categorías cacheadas, diálogos lazy y escritura de favoritos antes de trackers.
+- Reindexado diferido y manual, fingerprint coherente entre almacenamiento y registro; el registro de copia completa no se emite por trabajos aún pendientes.
+- Resource vectors nuevos Kiroha para launcher normal, debug y round en Android moderno; versionCode 144.
+- Diagnóstico DEBUG sin secretos de Browse/background y protección de error de copia mpv.
 
-## Build validation
+## Situación de compilación
 
-GitHub Actions PR check for this branch:
-https://github.com/cristiancutizaca/KIROHA_APP/actions/runs/38437168888
+- `./gradlew` **NO pudo ejecutarse en el entorno de esta conversación**: el runtime de ejecución local devolvió errores.
+- GitHub Actions CI y Kiroha Android debug APK reportaron **failure antes del primer paso** (0 steps) para el HEAD comprobado; no muestran error de compilación Gradle.
+- Resultado: **BUILD PENDING / HARDWARE TEST PENDING**. No hay APK nueva verificable ni benchmark real.
 
-**Result:** GitHub marked the job failed before any step ran, with an empty steps
-array and no job logs available. This did NOT compile or test these changes;
-it cannot be interpreted as a source-code build failure.
+## Validación por realizar
 
-Run in an Android/Gradle development environment:
+1. `spotlessCheck`, `:kiroha-core:test`, `testDebugUnitTest`, migraciones, ARM64/Universal build y validación de instalación/firmas.
+2. Reproducir fuente → botón Inicio → regreso y capturar logcat. Comprobar cola antes y después con 10/100/500/1000 trabajos.
+3. Cortar procesos/red a mitad de manga con 97/100 páginas, comprobar que conserva archivos y bytes parciales y reinicia trabajo según pausa.
+4. Manga y Anime Browse profundo (20–60 páginas) contra Tail con la misma extensión, red y filtros; medir tiempos y duplicados.
+5. Agregar 100 entradas a Biblioteca grande y abrir categorías repetidamente; comparar tiempos inicial/final, memoria y observers.
+6. Medir comportamiento térmico y CPU en celular bajo Browse + descargas simultáneas.
+7. Probar SAF/microSD y reindexado real de archivos Tail/Mihon existentes sin indices previos (funcionalidad incompleta).
+8. Probar SyncSpace con múltiples dispositivos y sin mezclar identidades.
+9. Comprobar launcher en instalador/Android y que actualización firmada con misma clave no obliga a desinstalar.
 
-```bash
-./gradlew spotlessApply
-./gradlew spotlessCheck
-./gradlew testDebugUnitTest
-./gradlew verifySqlDelightMigration
-./gradlew assembleDebug
-```
+## Pendientes reales
 
-A successful Android build and installation are still required before merging.
+Manifest granular de todos los estados/reintentos, descubrimiento de archivos no indexados, coordinador global de jobs, pruebas de regresión Android y rendimiento reproducible, branding PNG antiguo/asset final elegido, pruebas de SyncSpace multi-device, firma estable y APK release certificada.
 
-## Hardware regression tests required
-
-1. Queue 30+ manga downloads and 30+ anime downloads (including overlapping
-   numeric local IDs); change tabs, kill process, and relaunch. Pending queue
-   entries must survive, and completed media must remain available.
-2. Enqueue, reorder, kill the process in the middle of activity, relaunch and
-   check queue integrity. Test pause, resume and network loss.
-3. Confirm chapter partial-page recovery on real SAF/internal storage.
-4. Browse e-hentai or another very large source for 20+ pages; compare the same
-   query/source to Tail. Verify no repeated pages, missing legitimate IDs, or
-   multi-minute per-page processing. Repeat for Anime.
-5. Add 100 items to a large library; reopen category dialog repeatedly and
-   switch between Library and Browse. Collect timings.
-6. Compare CPU/thermal behavior when downloading 5 concurrent chapters versus
-   Tail with identical content and no restore/reindex running.
-
-## Explicit remaining work
-
-- Full crash-safe per-page manifest and granular persisted item states.
-- Hardware proof of progress and sync across two or more devices.
-- Full end-to-end reindex of existing Tail/Mihon downloads on external SAF/microSD.
-- Download thermal-aware concurrency and broad work coordinator.
-- Applying the **user-selected** original Kiroha icon asset to all launcher flavors
-  (the exact image asset is not in this repository).
-- Debug/universal APK packaging, hashing, signed release build.
-- Large-library performance benchmarks and final real-device certification.
-
-Do not tag or publish as v0.1 final until those checks are complete.
+**No declarar RC definitiva ni subir tag de versión final antes de pasar estas pruebas.**
