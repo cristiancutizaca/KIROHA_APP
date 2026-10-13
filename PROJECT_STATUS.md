@@ -1,4 +1,15 @@
-# Kiroha v0.1 — Project Status (fixed final)
+# Kiroha v0.1 — Project Status (historial del paquete FIXED)
+
+> **Aviso de versión (13/10/2026):** Los resultados `SUCCESS` y las APK indicadas abajo
+> pertenecen al **paquete FIXED del 07/10**, no al HEAD actual de `main`.
+> Desde entonces se modificaron colas, fuentes Browse, reindexado, WorkManager,
+> recursos Kiroha y versión Android. El código nuevo **aún no ha compilado en CI
+> ni se ha validado físicamente**. Los jobs actuales fallan antes del primer paso.
+> Consultar [KNOWN_ISSUES.md](KNOWN_ISSUES.md) y
+> [KIROHA_RC_VALIDATION.md](KIROHA_RC_VALIDATION.md) para estado vigente.
+>
+> Los cambios de recuperación de páginas y migración de huellas incluyen tests
+> escritos, pero **no ejecutados**. `versionCode=144`; conservar firma al actualizar.
 
 Actualizado: 2026-10-07
 
