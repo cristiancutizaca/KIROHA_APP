@@ -1,5 +1,15 @@
 # Kiroha v0.1 — Known Issues
 
+## Correcciones P0/P1 del 13/10/2026 (sin validación física todavía)
+
+- **Colas:** manga y anime ya no comparten `active_downloads`. Se separaron los almacenes, se agregó migración de entradas anteriores, y la restauración ya no vacía el almacén antes de completar. El worker espera a la restauración antes de iniciar.
+- **Paginación:** manga y anime avanzan por páginas intermedias vacías o duplicadas con un límite de seguridad de seis páginas. La deduplicación sigue basada en URL, no título.
+- **Browse:** las consultas individuales de los resultados dejan de coleccionarse permanentemente cuando no tienen suscriptores visibles. El rendimiento en fuentes reales, especialmente e-hentai, sigue pendiente de medir.
+- **Descargas/temperatura:** se corrigió el ciclo de espera de los workers, se evita reemplazar el worker activo y se impone un límite global de capítulos simultáneos; los videos activos bajaron a dos. El comportamiento térmico del teléfono aún requiere validación.
+- **Reindexado:** se añadió `Reindexar descargas` al menú de Biblioteca y se evita repetir el reindexado automático completo durante 12 horas después de terminar uno, salvo orden manual.
+- **Cierre al volver al inicio desde una extensión:** confirmado por el usuario en Android, pero la causa exacta no está aislada. Revisar logcat/CrashActivity al reproducirse; **no marcar como resuelto** por los cambios de concurrencia.
+- **Compilación:** GitHub Actions falló antes de ejecutar sus pasos en las ejecuciones observadas el 13/10. No se verificó la compilación ni se generó APK a partir de estos cambios. No asumir que el código compila hasta pasar CI/Gradle.
+
 - No hay teléfono, ADB, emulador ni microSD disponibles en el sandbox. SAF, retirada/reinserción y cambio A23 → M8 requieren validación física.
 - El índice portátil es un acelerador, no una autoridad. La autoridad es la existencia y fingerprint verificados por `StorageProvider`.
 - La UI de biblioteca todavía usa filtros maduros de Mihon/Animetail; `DownloadFilterEngine` ya está en Core, pero sus chips visuales Kiroha quedan pendientes.
