@@ -1,0 +1,51 @@
+name: Kiroha Android debug APK
+
+on:
+  push:
+    branches:
+      - fix/kiroha-v01-p0-reliability
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug-apk:
+    name: Build installable arm64 + universal APKs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Install JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version-file: .github/.java-version
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Ensure Gradle wrapper is executable
+        run: chmod +x gradlew
+      - name: Unit tests and Kotlin compilation
+        run: ./gradlew :kiroha-core:test :data:compileDebugKotlin :app:compileDebugKotlin --stacktrace --no-daemon
+      - name: Build all debug APK variants
+        run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
+      - name: Collect ARM64 and universal APKs with SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p kiroha-apks
+          ls -lh app/build/outputs/apk/debug/
+          cp app/build/outputs/apk/debug/app-arm64-v8a-debug.apk kiroha-apks/Kiroha_v0.1_arm64-v8a_debug.apk
+          cp app/build/outputs/apk/debug/app-universal-debug.apk kiroha-apks/Kiroha_v0.1_universal_debug.apk
+          cd kiroha-apks
+          sha256sum *.apk > SHA256SUMS.txt
+      - name: Upload APKs ready for Android installation
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kiroha-v0.1-android-debug-${{ github.run_number }}
+          path: kiroha-apks/
+          if-no-files-found: error
+          retention-days: 14
