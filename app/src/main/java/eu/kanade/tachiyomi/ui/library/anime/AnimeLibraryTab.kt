@@ -24,12 +24,14 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import dev.zacsweers.metrox.viewmodel.metroViewModel
+import eu.kanade.presentation.category.components.CategoryCreateDialog
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.entries.components.LibraryBottomActionMenu
 import eu.kanade.presentation.library.DeleteLibraryEntryDialog
@@ -45,6 +47,9 @@ import eu.kanade.tachiyomi.data.library.anime.AnimeLibraryUpdateJob
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.ui.browse.anime.source.globalsearch.GlobalAnimeSearchScreen
 import eu.kanade.tachiyomi.ui.category.CategoriesTab
+import eu.kanade.tachiyomi.ui.category.anime.AnimeCategoryDialog
+import eu.kanade.tachiyomi.ui.category.anime.AnimeCategoryScreenModel
+import eu.kanade.tachiyomi.ui.category.anime.AnimeCategoryScreenState
 import eu.kanade.tachiyomi.ui.entries.anime.AnimeScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.main.MainActivity
@@ -107,7 +112,9 @@ data object AnimeLibraryTab : Tab {
 
         val viewModel = metroViewModel<AnimeLibraryViewModel>()
         val settingsViewModel = metroViewModel<AnimeLibrarySettingsViewModel>()
+        val categoryScreenModel = rememberScreenModel { AnimeCategoryScreenModel() }
         val state by viewModel.state.collectAsStateWithLifecycle()
+        val categoryScreenState by categoryScreenModel.state.collectAsStateWithLifecycle()
 
         val snackbarHostState = remember { SnackbarHostState() }
 
@@ -198,6 +205,10 @@ data object AnimeLibraryTab : Tab {
                     onClickReindexDownloads = {
                         (context.applicationContext as? eu.kanade.tachiyomi.App)?.requestKirohaDownloadReindex()
                     },
+                    onClickCreateCategory = {
+                        categoryScreenModel.showDialog(AnimeCategoryDialog.Create)
+                    },
+                    onClickManageCategories = { navigator.push(CategoriesTab) },
                     searchQuery = state.searchQuery,
                     onSearchQueryChange = viewModel::search,
                     scrollBehavior = scrollBehavior.takeIf { !tabVisible }, // For scroll overlay when no tab
@@ -323,6 +334,22 @@ data object AnimeLibraryTab : Tab {
             }
 
             null -> {}
+        }
+
+        (categoryScreenState as? AnimeCategoryScreenState.Success)?.let { categoryState ->
+            if (categoryState.dialog == AnimeCategoryDialog.Create) {
+                CategoryCreateDialog(
+                    onDismissRequest = categoryScreenModel::dismissDialog,
+                    onCreate = { name ->
+                        categoryScreenModel.createCategory(name)
+                        // Show user-defined folders immediately after creation,
+                        // even if the library had been grouped by source or status.
+                        settingsViewModel.setGrouping(AnimeLibraryGroup.BY_DEFAULT)
+                        settingsViewModel.libraryPreferences.categoryTabs.set(true)
+                    },
+                    categories = categoryState.categories.map { it.name },
+                )
+            }
         }
 
         BackHandler(enabled = state.selectionMode || state.searchQuery != null) {
