@@ -893,6 +893,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             download.chapter.url,
             download.manga.title,
             download.source,
+            download.manga.url,
         )
         val relativePath = chapterDir?.let {
             listOf(
