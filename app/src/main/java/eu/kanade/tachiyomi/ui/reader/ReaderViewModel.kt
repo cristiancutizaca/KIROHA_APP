@@ -240,6 +240,7 @@ class ReaderViewModel(
                                             it.url,
                                             manga.title,
                                             manga.source,
+                                            mangaUrl = manga.url,
                                         )
                                     ) ||
                                 (
@@ -250,6 +251,7 @@ class ReaderViewModel(
                                             it.url,
                                             manga.title,
                                             manga.source,
+                                            mangaUrl = manga.url,
                                         )
                                     ) ||
                                 (manga.bookmarkedFilterRaw == Manga.CHAPTER_SHOW_BOOKMARKED && !it.bookmark) ||
@@ -477,6 +479,7 @@ class ReaderViewModel(
                 manga.title,
                 manga.source,
                 skipCache = true,
+                mangaUrl = manga.url,
             )
             if (isDownloaded) {
                 chapter.state = ReaderChapter.State.Wait
@@ -564,6 +567,7 @@ class ReaderViewModel(
                 nextChapter.url,
                 manga.title,
                 manga.source,
+                mangaUrl = manga.url,
             )
             if (!isNextChapterDownloaded) return@launchIO
 
@@ -648,7 +652,7 @@ class ReaderViewModel(
         val device = DeviceRegistry(AndroidKeyValueStore(context)).load() ?: return
         val chapter = readerChapter.chapter
         val sourceNamespace = manga?.source?.toString() ?: return
-        val itemId = "manga:$sourceNamespace:${chapter.url}"
+        val itemId = kiroha.core.KirohaIdentity.mangaChapter(sourceNamespace, manga?.url ?: return, chapter.url)
         val now = System.currentTimeMillis()
         LocalSyncJournal(AndroidKeyValueStore(context)).append(
             SyncEvent(

@@ -117,6 +117,16 @@ enum class ProgressKind { MANGA_PAGE, VIDEO_POSITION }
 data class ProgressEvent(val itemId: String, val chapterId: String, val position: Long, val kind: ProgressKind, val updatedAt: Long, val deviceId: String)
 
 object KirohaIdentity {
+    /**
+     * Source + series URL + chapter URL is the minimum safe identity.
+     * A chapter URL (especially relative ones) may be reused by separate works.
+     */
+    fun mangaChapter(sourceNamespace: String, mangaUrl: String, chapterUrl: String): String {
+        require(sourceNamespace.isNotBlank() && mangaUrl.isNotBlank() && chapterUrl.isNotBlank())
+        return "manga:v2:$sourceNamespace:" + mangaUrl.sha256().take(24) + ":" + chapterUrl.sha256().take(24)
+    }
+
+    @Deprecated("Missing the parent manga URL: may collide across titles", level = DeprecationLevel.WARNING)
     fun manga(sourceNamespace: String, chapterCanonicalId: String): String =
         "manga:$sourceNamespace:$chapterCanonicalId"
 

@@ -305,7 +305,7 @@ class MangaDownloader(
         val wasEmpty = queueState.value.isEmpty()
         val chaptersToQueue = chapters.asSequence()
             // Filter out those already downloaded.
-            .filter { provider.findChapterDir(it.name, it.scanlator, it.url, manga.title, source) == null }
+            .filter { provider.findChapterDir(it.name, it.scanlator, it.url, manga.title, source, manga.url) == null }
             // Add chapters to queue from the start.
             .sortedByDescending { it.sourceOrder }
             // Filter out those already enqueued.
@@ -346,7 +346,7 @@ class MangaDownloader(
      * @param download the chapter to be downloaded.
      */
     private suspend fun downloadChapter(download: MangaDownload) {
-        val mangaDir = provider.getMangaDir(download.manga.title, download.source)
+        val mangaDir = provider.getMangaDir(download.manga.title, download.source, download.manga.url)
 
         val availSpace = DiskUtil.getAvailableStorageSpace(mangaDir)
         if (availSpace != -1L && availSpace < MIN_DISK_SPACE) {

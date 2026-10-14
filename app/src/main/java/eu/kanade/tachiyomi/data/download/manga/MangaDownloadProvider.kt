@@ -7,6 +7,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.util.lang.Hash.md5
+import kiroha.core.KirohaDownloadPaths
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
@@ -44,11 +45,11 @@ class MangaDownloadProvider(
      * @param mangaTitle the title of the manga to query.
      * @param source the source of the manga.
      */
-    internal fun getMangaDir(mangaTitle: String, source: MangaSource): UniFile {
+    internal fun getMangaDir(mangaTitle: String, source: MangaSource, mangaUrl: String): UniFile {
         try {
             return downloadsDir!!
                 .createDirectory(getSourceDirName(source))!!
-                .createDirectory(getMangaDirName(mangaTitle))!!
+                .createDirectory(getMangaDirName(mangaTitle, mangaUrl, source.id))!!
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "Invalid download directory" }
             throw Exception(
@@ -75,9 +76,10 @@ class MangaDownloadProvider(
      * @param mangaTitle the title of the manga to query.
      * @param source the source of the manga.
      */
-    fun findMangaDir(mangaTitle: String, source: MangaSource): UniFile? {
+    fun findMangaDir(mangaTitle: String, source: MangaSource, mangaUrl: String? = null): UniFile? {
+        if (mangaUrl.isNullOrBlank()) return null
         val sourceDir = findSourceDir(source)
-        return sourceDir?.findFile(getMangaDirName(mangaTitle))
+        return sourceDir?.findFile(getMangaDirName(mangaTitle, mangaUrl, source.id))
     }
 
     /**
@@ -95,8 +97,9 @@ class MangaDownloadProvider(
         chapterUrl: String,
         mangaTitle: String,
         source: MangaSource,
+        mangaUrl: String? = null,
     ): UniFile? {
-        val mangaDir = findMangaDir(mangaTitle, source)
+        val mangaDir = findMangaDir(mangaTitle, source, mangaUrl)
         return getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl).asSequence()
             .mapNotNull { mangaDir?.findFile(it) }
             .firstOrNull()
@@ -110,7 +113,7 @@ class MangaDownloadProvider(
      * @param source the source of the chapter.
      */
     fun findChapterDirs(chapters: List<Chapter>, manga: Manga, source: MangaSource): Pair<UniFile?, List<UniFile>> {
-        val mangaDir = findMangaDir(manga.title, source) ?: return null to emptyList()
+        val mangaDir = findMangaDir(manga.title, source, manga.url) ?: return null to emptyList()
         return mangaDir to chapters.mapNotNull { chapter ->
             getValidChapterDirNames(chapter.name, chapter.scanlator, chapter.url).asSequence()
                 .mapNotNull { mangaDir.findFile(it) }
@@ -124,10 +127,15 @@ class MangaDownloadProvider(
      * @param source the source to query.
      */
     fun getSourceDirName(source: MangaSource): String {
-        return DiskUtil.buildValidFilename(
+        // A display label alone is not an extension identity: multiple source IDs
+        // can share a label, and their manga must never share cache ownership.
+        val suffix = "__s_" + source.id
+        val prefix = DiskUtil.buildValidFilename(
             source.toString(),
-            disallowNonAscii = libraryPreferences.disallowNonAsciiFilenames.get(),
+            DiskUtil.MAX_FILE_NAME_BYTES - suffix.toByteArray(Charsets.UTF_8).size,
+            libraryPreferences.disallowNonAsciiFilenames.get(),
         )
+        return prefix + suffix
     }
 
     /**
@@ -135,11 +143,23 @@ class MangaDownloadProvider(
      *
      * @param mangaTitle the title of the manga to query.
      */
-    fun getMangaDirName(mangaTitle: String): String {
-        return DiskUtil.buildValidFilename(
+    /**
+     * Namespaced by source ID and canonical manga URL, not by title alone.
+     * This prevents distinct galleries with the same displayed title from sharing files.
+     * The title is only a readable prefix; the stable suffix owns the identity.
+     *
+     * Existing title-only directories are left untouched. They cannot be assigned to
+     * a specific manga safely when several works share a title.
+     */
+    fun getMangaDirName(mangaTitle: String, mangaUrl: String, sourceId: Long): String {
+        require(mangaUrl.isNotBlank()) { "A manga URL is required to identify downloads" }
+        val suffix = KirohaDownloadPaths.mangaSuffix(sourceId, mangaUrl)
+        val prefix = DiskUtil.buildValidFilename(
             mangaTitle,
-            disallowNonAscii = libraryPreferences.disallowNonAsciiFilenames.get(),
+            DiskUtil.MAX_FILE_NAME_BYTES - suffix.toByteArray(Charsets.UTF_8).size,
+            libraryPreferences.disallowNonAsciiFilenames.get(),
         )
+        return prefix + suffix
     }
 
     /**
@@ -153,17 +173,17 @@ class MangaDownloadProvider(
         chapterName: String,
         chapterScanlator: String?,
         chapterUrl: String,
-        includeHash: Boolean = downloadPreferences.includeHashInDownloadFilenames.get(),
+        includeHash: Boolean = true,
         disallowNonAsciiFilenames: Boolean = libraryPreferences.disallowNonAsciiFilenames.get(),
     ): String {
         var dirName = sanitizeChapterName(chapterName)
         if (!chapterScanlator.isNullOrBlank()) {
             dirName = chapterScanlator + "_" + dirName
         }
-        // Subtract 7 bytes for hash and underscore, 4 bytes for .cbz
-        dirName = DiskUtil.buildValidFilename(dirName, DiskUtil.MAX_FILE_NAME_BYTES - 11, disallowNonAsciiFilenames)
+        // Reserve 12 hex digits + underscore and the 4-byte .cbz extension.
+        dirName = DiskUtil.buildValidFilename(dirName, DiskUtil.MAX_FILE_NAME_BYTES - 17, disallowNonAsciiFilenames)
         if (includeHash) {
-            dirName += "_" + md5(chapterUrl).take(6)
+            dirName += "_" + md5(chapterUrl).take(12)
         }
         return dirName
     }
@@ -255,20 +275,19 @@ class MangaDownloadProvider(
      * @param chapterUrl url of the chapter to query.
      */
     fun getValidChapterDirNames(chapterName: String, chapterScanlator: String?, chapterUrl: String): List<String> {
-        val chapterDirName = getChapterDirName(chapterName, chapterScanlator, chapterUrl)
-        val legacyChapterDirNames = getLegacyChapterDirNames(chapterName, chapterScanlator, chapterUrl)
-
-        return buildList {
-            // Folder of images
-            add(chapterDirName)
-            // Archived chapters
-            add("$chapterDirName.cbz")
-
-            // any legacy names
-            legacyChapterDirNames.forEach {
-                add(it)
-                add("$it.cbz")
-            }
-        }
+        // Never match a download by chapter title alone, or a different gallery with
+        // a same-named chapter will appear downloaded. Old unhashed files remain
+        // on disk for an explicit, identity-aware migration.
+        val names = listOf(
+            getChapterDirName(chapterName, chapterScanlator, chapterUrl, includeHash = true),
+            getChapterDirName(
+                chapterName,
+                chapterScanlator,
+                chapterUrl,
+                includeHash = true,
+                disallowNonAsciiFilenames = !libraryPreferences.disallowNonAsciiFilenames.get(),
+            ),
+        ).distinct()
+        return names.flatMap { listOf(it, "$it.cbz") }
     }
 }

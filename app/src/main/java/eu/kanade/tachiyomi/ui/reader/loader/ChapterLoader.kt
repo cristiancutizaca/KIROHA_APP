@@ -93,9 +93,10 @@ class ChapterLoader(
             chapterName = dbChapter.name,
             chapterScanlator = dbChapter.scanlator,
             chapterUrl = dbChapter.url,
-            mangaTitle = manga.ogTitle,
+            mangaTitle = manga.title,
             sourceId = manga.source,
             skipCache = true,
+            mangaUrl = manga.url,
         )
         return when {
             isDownloaded -> DownloadPageLoader(

@@ -593,6 +593,7 @@ class MangaLibraryViewModel(
                                 chapter.url,
                                 manga.title,
                                 manga.source,
+                                mangaUrl = manga.url,
                             )
                     }
                     .let { if (amount != null) it.take(amount) else it }

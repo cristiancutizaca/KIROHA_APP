@@ -143,6 +143,7 @@ class MangaDownloadManager(
             chapterUrl = chapter.url,
             mangaTitle = manga.title,
             source = source,
+            mangaUrl = manga.url,
         )
         val files = chapterDir?.listFiles().orEmpty()
             .filter { it.isFile && ImageUtil.isImage(it.name) { it.openInputStream() } }
@@ -164,6 +165,7 @@ class MangaDownloadManager(
         mangaTitle: String,
         sourceId: Long,
         skipCache: Boolean = false,
+        mangaUrl: String? = null,
     ): Boolean {
         return cache.isChapterDownloaded(
             chapterName = chapterName,
@@ -172,6 +174,7 @@ class MangaDownloadManager(
             mangaTitle = mangaTitle,
             sourceId = sourceId,
             skipCache = skipCache,
+            mangaUrl = mangaUrl,
         )
     }
 
@@ -219,7 +222,7 @@ class MangaDownloadManager(
             if (removeQueued) {
                 downloader.removeFromQueue(manga)
             }
-            provider.findMangaDir(manga.title, source)?.delete()
+            provider.findMangaDir(manga.title, source, manga.url)?.delete()
             cache.removeManga(manga)
 
             val sourceDir = provider.findSourceDir(source)
@@ -281,8 +284,8 @@ class MangaDownloadManager(
 
     suspend fun renameManga(manga: Manga, newTitle: String) {
         val source = sourceManager.getOrStub(manga.source)
-        val oldFolder = provider.findMangaDir(manga.title, source) ?: return
-        val newName = provider.getMangaDirName(newTitle)
+        val oldFolder = provider.findMangaDir(manga.title, source, manga.url) ?: return
+        val newName = provider.getMangaDirName(newTitle, manga.url, manga.source)
 
         if (oldFolder.name == newName) return
 
@@ -307,7 +310,7 @@ class MangaDownloadManager(
     suspend fun renameChapter(source: MangaSource, manga: Manga, oldChapter: Chapter, newChapter: Chapter) {
         val oldNames = provider.getValidChapterDirNames(oldChapter.name, oldChapter.scanlator, oldChapter.url)
         val mangaDir = try {
-            provider.getMangaDir(manga.title, source)
+            provider.getMangaDir(manga.title, source, manga.url)
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "Manga download folder doesn't exist. Skipping renaming after source sync" }
             return
