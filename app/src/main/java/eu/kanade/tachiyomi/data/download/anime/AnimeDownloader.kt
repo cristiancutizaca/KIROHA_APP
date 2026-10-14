@@ -352,28 +352,24 @@ class AnimeDownloader(
      * @param download the episode to be downloaded.
      */
     private suspend fun downloadEpisode(download: AnimeDownload) {
-        val animeDir = provider.getAnimeDir(download.anime.title, download.source)
-
-        val availSpace = DiskUtil.getAvailableStorageSpace(animeDir)
-        if (availSpace != -1L && availSpace < MIN_DISK_SPACE) {
-            download.status = AnimeDownload.State.ERROR
-            notifier.onError(
-                context.stringResource(AYMR.strings.download_insufficient_space),
-                download.episode.name,
-                download.anime.title,
-                download.anime.id,
-            )
-            return
-        }
-
-        val episodeDirname = provider.getEpisodeDirName(
-            download.episode.name,
-            download.episode.scanlator,
-            download.episode.url,
-        )
-        val tmpDir = animeDir.createDirectory(episodeDirname + TMP_DIR_SUFFIX)!!
-
+        // Even creating the directory may fail. Treat it as an error for this
+        // episode instead of crashing the worker and abandoning the whole season.
         try {
+            val animeDir = provider.getAnimeDir(download.anime.title, download.source)
+
+            val availSpace = DiskUtil.getAvailableStorageSpace(animeDir)
+            if (availSpace != -1L && availSpace < MIN_DISK_SPACE) {
+                throw IllegalStateException(context.stringResource(AYMR.strings.download_insufficient_space))
+            }
+
+            val episodeDirname = provider.getEpisodeDirName(
+                download.episode.name,
+                download.episode.scanlator,
+                download.episode.url,
+            )
+            val tmpDir = animeDir.createDirectory(episodeDirname + TMP_DIR_SUFFIX)
+                ?: throw IllegalStateException("Cannot create episode download directory")
+
             if (download.video == null) {
                 // Pull video from network and add them to download object
                 val hosters = EpisodeLoader.getHosters(download.episode, download.anime, download.source)
@@ -389,19 +385,20 @@ class AnimeDownloader(
                 getOrDownloadVideoFile(download, tmpDir)
             }
 
-            if (!isDownloadSuccessful(download, tmpDir)) {
-                download.status = AnimeDownload.State.ERROR
-                return
+            if (!isDownloadSuccessful(tmpDir)) {
+                throw IllegalStateException("No completed video file was produced for this episode")
             }
 
             val filename = DiskUtil.buildValidFilename("${download.anime.title} - ${download.episode.name}")
             tmpDir.findFile("${filename}_tmp.mkv")?.delete()
-            tmpDir.renameTo(episodeDirname)
+            if (!tmpDir.renameTo(episodeDirname)) {
+                throw IllegalStateException("Could not finalize episode download directory")
+            }
+            val completedDir = animeDir.findFile(episodeDirname)
+                ?: throw IllegalStateException("Completed episode directory is missing")
 
+            DiskUtil.createNoMediaFile(completedDir, context)
             cache.addEpisode(episodeDirname, animeDir, download.anime)
-
-            DiskUtil.createNoMediaFile(tmpDir, context)
-
             download.status = AnimeDownload.State.DOWNLOADED
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
@@ -494,10 +491,13 @@ class AnimeDownloader(
             httpServer?.stop()
             progressJob?.cancel()
         } catch (e: Exception) {
-            httpServer?.stop()
             if (e is CancellationException) throw e
             video.status = Video.State.ERROR
-            notifier.onError(e.message, download.episode.name, download.anime.title, download.anime.id)
+            // Propagate the failure so only this episode is marked as ERROR.
+            // Swallowing it could mark a half-written temporary file as downloaded.
+            throw e
+        } finally {
+            httpServer?.stop()
             progressJob?.cancel()
         }
     }
@@ -853,12 +853,16 @@ class AnimeDownloader(
      * @param download the download to check.
      * @param tmpDir the directory where the download is currently stored.
      */
-    private fun isDownloadSuccessful(
-        download: AnimeDownload,
-        tmpDir: UniFile,
-    ): Boolean {
-        val downloadedVideo = tmpDir.listFiles().orEmpty().filterNot { it.extension == ".tmp" }
-        return downloadedVideo.size == 1
+    private fun isDownloadSuccessful(tmpDir: UniFile): Boolean {
+        // A leftover .tmp file or an empty placeholder from an external downloader
+        // must never count as a completed episode.
+        return tmpDir.listFiles().orEmpty().any { file ->
+            val name = file.name.orEmpty()
+            val isVideo = name.endsWith(".mkv", ignoreCase = true) ||
+                name.endsWith(".mp4", ignoreCase = true) ||
+                name.endsWith(".webm", ignoreCase = true)
+            isVideo && !name.endsWith("_tmp.mkv", ignoreCase = true) && file.length() > 0L
+        }
     }
 
     /**
