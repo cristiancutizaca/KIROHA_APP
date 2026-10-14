@@ -303,15 +303,16 @@ class MangaDownloader(
         if (chapters.isEmpty()) return
 
         val source = sourceManager.get(manga.source) as? HttpSource ?: return
-        val wasEmpty = queueState.value.isEmpty()
+        // Reading queueState and scanning the whole queue for every chapter is
+        // quadratic when selecting a long series. Reject queued IDs first so
+        // we also avoid needless SAF reads for already-queued chapters.
+        val queuedChapterIds = queueState.value.mapTo(hashSetOf()) { it.chapter.id }
         val chaptersToQueue = chapters.asSequence()
-            // Filter out those already downloaded.
+            .filter { it.id !in queuedChapterIds }
+            // Check disk only for chapters not already in the queue.
             .filter { provider.findChapterDir(it.name, it.scanlator, it.url, manga.title, source, manga.url) == null }
             // Add chapters to queue from the start.
             .sortedByDescending { it.sourceOrder }
-            // Filter out those already enqueued.
-            .filter { chapter -> queueState.value.none { it.chapter.id == chapter.id } }
-            // Create a download for each one.
             .map { MangaDownload(source, manga, it) }
             .toList()
 
@@ -319,7 +320,7 @@ class MangaDownloader(
             addAllToQueue(chaptersToQueue)
 
             // Start downloader if needed
-            if (autoStart && wasEmpty) {
+            if (autoStart && !isRunning && !isPaused) {
                 val queuedDownloads = queueState.value.count { it: MangaDownload -> it.source !is UnmeteredSource }
                 val maxDownloadsFromSource = queueState.value
                     .groupBy { it.source }
