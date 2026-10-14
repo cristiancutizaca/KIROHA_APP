@@ -631,9 +631,13 @@ class AnimeDownloader(
 
         // Duration probing is only used for displaying progress. Some hosters
         // reject ffprobe even when FFmpeg can download the stream successfully.
-        duration = runCatching {
-            getDuration(ffprobeCommand(video.videoUrl, headerOptions))?.toLong()
-        }.getOrNull() ?: 0L
+        duration = try {
+            getDuration(ffprobeCommand(video.videoUrl, headerOptions))?.toLong() ?: 0L
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            0L
+        }
 
         suspendCancellableCoroutine { continuation ->
             val session = FFmpegKit.executeWithArgumentsAsync(
