@@ -126,10 +126,15 @@ class MangaDownloadProvider(
      * @param source the source to query.
      */
     fun getSourceDirName(source: MangaSource): String {
-        return DiskUtil.buildValidFilename(
+        // A display label alone is not an extension identity: multiple source IDs
+        // can share a label, and their manga must never share cache ownership.
+        val suffix = "__s_" + source.id
+        val prefix = DiskUtil.buildValidFilename(
             source.toString(),
-            disallowNonAscii = libraryPreferences.disallowNonAsciiFilenames.get(),
+            DiskUtil.MAX_FILE_NAME_BYTES - suffix.toByteArray(Charsets.UTF_8).size,
+            libraryPreferences.disallowNonAsciiFilenames.get(),
         )
+        return prefix + suffix
     }
 
     /**
