@@ -187,8 +187,21 @@ class MangaDownloadProvider(
             getLegacyChapterDirNames(chapterName, chapterScanlator, chapterUrl)
                 .flatMap { listOf(it, "$it.cbz") }).distinct()
 
+        val chapterUrlHash = "_" + md5(chapterUrl).take(12)
         return candidates.asSequence().mapNotNull(legacyMangaDir::findFile)
-            .firstOrNull { file -> hasVerifiedLegacyComicInfo(file, expectedUrl) }
+            .firstOrNull { file ->
+                // Many earlier downloads include a hash derived from the exact
+                // chapter URL. This proves identity even if ComicInfo is absent.
+                // Never accept an old *unhashed* chapter name on title alone.
+                val withoutExtension = file.name.orEmpty().removeSuffix(".cbz")
+                val hasChapterIdentity = withoutExtension.endsWith(chapterUrlHash) &&
+                    if (file.isDirectory) {
+                        file.listFiles().orEmpty().any { it.isFile && it.length() > 0L }
+                    } else {
+                        file.isFile && file.length() > 512L
+                    }
+                hasChapterIdentity || hasVerifiedLegacyComicInfo(file, expectedUrl)
+            }
     }
 
     /** Read at most 512 KiB of metadata, never the actual manga images. */
