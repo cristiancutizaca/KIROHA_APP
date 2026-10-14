@@ -652,7 +652,7 @@ class ReaderViewModel(
         val device = DeviceRegistry(AndroidKeyValueStore(context)).load() ?: return
         val chapter = readerChapter.chapter
         val sourceNamespace = manga?.source?.toString() ?: return
-        val itemId = "manga:$sourceNamespace:${chapter.url}"
+        val itemId = kiroha.core.KirohaIdentity.mangaChapter(sourceNamespace, manga?.url ?: return, chapter.url)
         val now = System.currentTimeMillis()
         LocalSyncJournal(AndroidKeyValueStore(context)).append(
             SyncEvent(
