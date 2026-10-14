@@ -10,6 +10,7 @@ import mihon.domain.library.model.search.ComparisonQueryNode
 import mihon.domain.library.model.search.EmptyQueryNode
 import mihon.domain.library.model.search.FieldQueryNode
 import mihon.domain.library.model.search.GeneralQueryNode
+import mihon.domain.library.model.search.LibraryMetadataTags
 import mihon.domain.library.model.search.MangaField
 import mihon.domain.library.model.search.NotNode
 import mihon.domain.library.model.search.OrNode
