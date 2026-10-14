@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.download.manga
 
 import android.content.Context
+import android.util.Xml
 import com.hippo.unifile.UniFile
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
@@ -9,9 +10,10 @@ import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.lang.Hash.md5
-import kiroha.core.KirohaDownloadPaths
 import eu.kanade.tachiyomi.util.storage.DiskUtil
+import kiroha.core.KirohaDownloadPaths
 import logcat.LogPriority
+import org.xmlpull.v1.XmlPullParser
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.displayablePath
 import tachiyomi.core.common.util.system.logcat
@@ -21,11 +23,9 @@ import tachiyomi.domain.items.chapter.model.Chapter
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.i18n.MR
-import java.io.IOException
 import java.io.File
+import java.io.IOException
 import java.util.zip.ZipFile
-import org.xmlpull.v1.XmlPullParser
-import android.util.Xml
 
 /**
  * This class is used to provide the directories where the downloads should be saved.
@@ -111,7 +111,9 @@ class MangaDownloadProvider(
             .firstOrNull()
         // New downloads keep their source ID + manga URL identity. Legacy folders
         // are only read after their embedded chapter URL proves ownership.
-        return current ?: findVerifiedLegacyChapterDir(chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl)
+        return current ?: findVerifiedLegacyChapterDir(
+            chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
+        )
     }
 
     /**
