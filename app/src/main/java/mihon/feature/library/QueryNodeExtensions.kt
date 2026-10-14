@@ -30,23 +30,30 @@ fun QueryNode.matches(item: MangaLibraryItem): Boolean {
     }
 }
 
+/**
+ * Plain library queries also examine original source metadata. Gallery extensions
+ * frequently put parody/character tags in the description instead of the title
+ * or the genre list, and custom information can hide the source description.
+ */
 private fun GeneralQueryNode.matches(item: MangaLibraryItem): Boolean {
     val manga = item.libraryManga.manga
 
-    // Use when so each added field has to be handled explicitly
+    // Use when so each added field has to be handled explicitly.
     val match = MangaField.entries.any { field ->
         if (field.fieldOnly) return@any false
 
         when (field) {
-            MangaField.TITLE -> manga.title.contains(value, ignoreCase = true)
+            MangaField.TITLE -> matchesText(value, manga.title, manga.ogTitle)
 
-            MangaField.AUTHOR -> manga.author?.contains(value, ignoreCase = true) ?: false
+            MangaField.AUTHOR -> matchesText(value, manga.author, manga.ogAuthor)
 
-            MangaField.ARTIST -> manga.artist?.contains(value, ignoreCase = true) ?: false
+            MangaField.ARTIST -> matchesText(value, manga.artist, manga.ogArtist)
 
-            MangaField.DESCRIPTION -> manga.description?.contains(value, ignoreCase = true) ?: false
+            MangaField.DESCRIPTION -> matchesText(value, manga.description, manga.ogDescription)
 
-            MangaField.GENRE -> manga.genre?.any { g -> g.contains(value, ignoreCase = true) } ?: false
+            MangaField.GENRE ->
+                manga.genre.orEmpty().any { it.contains(value, ignoreCase = true) } ||
+                    manga.ogGenre.orEmpty().any { it.contains(value, ignoreCase = true) }
 
             MangaField.SOURCE -> {
                 item.sourceName.contains(value, ignoreCase = true) ||
@@ -55,8 +62,20 @@ private fun GeneralQueryNode.matches(item: MangaLibraryItem): Boolean {
 
             MangaField.NOTES -> manga.notes.contains(value, ignoreCase = true)
 
-            // field-only queries; unreachable; added here to make `when` exhaustive
-            MangaField.LANGUAGE, MangaField.SOURCE_ID -> error("How did we get here?")
+            // These require field queries or are handled by the source metadata above.
+            MangaField.TAG,
+            MangaField.PARODY,
+            MangaField.CHARACTER,
+            MangaField.FEMALE,
+            MangaField.MALE,
+            MangaField.MIXED,
+            MangaField.OTHER,
+            MangaField.GROUP,
+            MangaField.COSPLAYER,
+            MangaField.UPLOADER,
+            MangaField.LANGUAGE,
+            MangaField.SOURCE_ID,
+            -> error("How did we get here?")
         }
     }
     return if (negated) !match else match
@@ -65,14 +84,32 @@ private fun GeneralQueryNode.matches(item: MangaLibraryItem): Boolean {
 private fun FieldQueryNode.matches(item: MangaLibraryItem): Boolean {
     val manga = item.libraryManga.manga
 
+    fun matchesMetadata(category: String): Boolean = LibraryMetadataTags.matches(
+        value = value,
+        category = category,
+        genres = manga.genre.orEmpty() + manga.ogGenre.orEmpty(),
+        descriptions = listOf(manga.description, manga.ogDescription),
+    )
+
     val match = when (field) {
         MangaField.GENRE -> {
             if (value.isEmpty()) {
-                manga.genre.isNullOrEmpty()
+                manga.genre.isNullOrEmpty() && manga.ogGenre.isNullOrEmpty()
             } else {
-                manga.genre?.any { g -> g.contains(value, ignoreCase = true) } ?: false
+                matchesMetadata("genre")
             }
         }
+
+        MangaField.TAG -> matchesMetadata("tag")
+        MangaField.PARODY -> matchesMetadata("parody")
+        MangaField.CHARACTER -> matchesMetadata("character")
+        MangaField.FEMALE -> matchesMetadata("female")
+        MangaField.MALE -> matchesMetadata("male")
+        MangaField.MIXED -> matchesMetadata("mixed")
+        MangaField.OTHER -> matchesMetadata("other")
+        MangaField.GROUP -> matchesMetadata("group")
+        MangaField.COSPLAYER -> matchesMetadata("cosplayer")
+        MangaField.UPLOADER -> matchesMetadata("uploader")
 
         MangaField.SOURCE -> {
             if (value.isEmpty()) {
@@ -87,33 +124,28 @@ private fun FieldQueryNode.matches(item: MangaLibraryItem): Boolean {
             value.toLongOrNull()?.let { it == manga.source } ?: false
         }
 
-        else -> {
-            val text = when (field) {
-                MangaField.TITLE -> manga.title
+        MangaField.TITLE -> matchesText(value, manga.title, manga.ogTitle)
+        MangaField.AUTHOR -> matchesText(value, manga.author, manga.ogAuthor)
+        MangaField.ARTIST ->
+            matchesText(value, manga.artist, manga.ogArtist) ||
+                matchesMetadata("artist")
 
-                MangaField.AUTHOR -> manga.author
-
-                MangaField.ARTIST -> manga.artist
-
-                MangaField.DESCRIPTION -> manga.description
-
-                MangaField.NOTES -> manga.notes
-
-                MangaField.LANGUAGE -> item.sourceLanguage
-
-                // unreachable; added here to make `when` exhaustive
-                MangaField.GENRE, MangaField.SOURCE, MangaField.SOURCE_ID -> error("How did we get here?")
-            }
-
-            if (value.isEmpty()) {
-                text.isNullOrEmpty()
-            } else {
-                text?.contains(value, ignoreCase = true) ?: false
-            }
-        }
+        MangaField.DESCRIPTION -> matchesText(value, manga.description, manga.ogDescription)
+        MangaField.NOTES -> matchesText(value, manga.notes)
+        MangaField.LANGUAGE ->
+            matchesText(value, item.sourceLanguage) ||
+                matchesMetadata("language")
     }
 
     return if (negated) !match else match
+}
+
+private fun matchesText(value: String, vararg texts: String?): Boolean {
+    return if (value.isEmpty()) {
+        texts.all { it.isNullOrEmpty() }
+    } else {
+        texts.any { it?.contains(value, ignoreCase = true) == true }
+    }
 }
 
 private fun ComparisonQueryNode.matches(item: MangaLibraryItem): Boolean {
