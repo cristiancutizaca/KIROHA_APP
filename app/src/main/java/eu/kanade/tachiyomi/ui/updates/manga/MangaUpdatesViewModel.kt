@@ -212,7 +212,10 @@ class MangaUpdatesViewModel(
         }
     }
 
-    private fun List<MangaUpdatesWithRelations>.toUpdateItems(): List<MangaUpdatesItem> {
+    private suspend fun List<MangaUpdatesWithRelations>.toUpdateItems(): List<MangaUpdatesItem> {
+        // One local lookup per distinct manga, never infer identity from title.
+        val mangaUrls = distinctBy { it.mangaId }
+            .associate { it.mangaId to getManga.await(it.mangaId)?.url }
         return this
             .map { update ->
                 val activeDownload = downloadManager.getQueuedDownloadOrNull(update.chapterId)
@@ -222,6 +225,7 @@ class MangaUpdatesViewModel(
                     update.chapterUrl,
                     update.mangaTitle,
                     update.sourceId,
+                    mangaUrl = mangaUrls[update.mangaId],
                 )
                 val downloadState = when {
                     activeDownload != null -> activeDownload.status
