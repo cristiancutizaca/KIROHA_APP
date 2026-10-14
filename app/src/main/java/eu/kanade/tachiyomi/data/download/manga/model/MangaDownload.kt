@@ -5,10 +5,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import tachiyomi.domain.entries.manga.interactor.GetManga
 import tachiyomi.domain.entries.manga.model.Manga
@@ -44,25 +41,26 @@ data class MangaDownload(
             _statusFlow.value = status
         }
 
+    /**
+     * One lightweight progress sampler instead of combining a Flow for every
+     * page. Large galleries (1,000+ images) otherwise create thousands of
+     * collectors and repeatedly allocate huge progress arrays.
+     *
+     * Keep this flow active across pause/retry, like the old combined flow.
+     * It is cancelled automatically when the queue UI stops collecting it.
+     */
     @Transient
     val progressFlow = flow {
-        if (pages == null) {
-            emit(0)
-            while (pages == null) {
-                delay(50.milliseconds)
-            }
+        while (true) {
+            emit(progress)
+            delay(500.milliseconds)
         }
-
-        val progressFlows = pages!!.map(Page::progressFlow)
-        emitAll(combine(progressFlows) { it.average().toInt() })
-    }
-        .distinctUntilChanged()
-        .debounce(50.milliseconds)
+    }.distinctUntilChanged()
 
     val progress: Int
         get() {
             val pages = pages ?: return 0
-            return pages.map(Page::progress).average().toInt()
+            return if (pages.isEmpty()) 0 else pages.sumOf(Page::progress) / pages.size
         }
 
     enum class State(val value: Int) {
