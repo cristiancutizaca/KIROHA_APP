@@ -844,8 +844,10 @@ class AnimeLibraryViewModel(
             // Create a copy of selected anime
             val animeList = state.value.selection.map { it.anime }
 
-            // Hide the default category because it has a different behavior than the ones from db.
-            val categories = state.value.categories.filter { it.id != 0L }
+            // The current library tabs may be virtual groups (source, status, tag).
+            // Never pass them as editable categories: only persisted anime categories
+            // can be assigned to an entry.
+            val categories = getCategories.await().filterNot(Category::isSystemCategory)
 
             // Get indexes of the common categories to preselect.
             val common = getCommonCategories(animeList)
