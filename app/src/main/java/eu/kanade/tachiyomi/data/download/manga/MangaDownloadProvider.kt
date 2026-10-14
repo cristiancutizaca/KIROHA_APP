@@ -25,6 +25,7 @@ import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.i18n.MR
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
 
 /**
@@ -44,6 +45,16 @@ class MangaDownloadProvider(
 
     private val downloadsDir: UniFile?
         get() = storageManager.getDownloadsDirectory()
+
+    // A legacy source may contain hundreds of title folders. Index it once in
+    // memory so checking each chapter does not enumerate the same directory
+    // hundreds of times. This index never moves or rewrites user files.
+    private data class LegacySourceFolders(val rootUri: String, val folders: Map<String, UniFile>)
+    private val legacyFolderIndex = ConcurrentHashMap<Long, LegacySourceFolders>()
+
+    fun invalidateLegacyFolderIndex() {
+        legacyFolderIndex.clear()
+    }
 
     /**
      * Returns the download directory for a manga. For internal use only.
@@ -147,15 +158,29 @@ class MangaDownloadProvider(
             DiskUtil.MAX_FILE_NAME_BYTES,
             libraryPreferences.disallowNonAsciiFilenames.get(),
         )
-        val legacySourceDir = root.findFile(legacySourceName) ?: return null
-        if (!legacySourceDir.isDirectory) return null
         val oldTitle = DiskUtil.buildValidFilename(
             mangaTitle,
             DiskUtil.MAX_FILE_NAME_BYTES,
             libraryPreferences.disallowNonAsciiFilenames.get(),
         )
-        val legacyMangaDir = legacySourceDir.findFile(oldTitle) ?: return null
-        if (!legacyMangaDir.isDirectory) return null
+        val rootUri = root.uri.toString() + "/" + legacySourceName
+        val stored = legacyFolderIndex[source.id]
+        val folders = if (stored?.rootUri == rootUri) {
+            stored.folders
+        } else {
+            // Scan the legacy source directory only once per storage/source.
+            // Unlike title-only matching, ownership is still verified below
+            // from the *individual chapter* ComicInfo URL.
+            val indexed = root.findFile(legacySourceName)
+                ?.takeIf { it.isDirectory }
+                ?.listFiles().orEmpty()
+                .asSequence()
+                .filter { it.isDirectory && !it.name.isNullOrBlank() }
+                .associateBy { it.name!! }
+            legacyFolderIndex[source.id] = LegacySourceFolders(rootUri, indexed)
+            indexed
+        }
+        val legacyMangaDir = folders[oldTitle] ?: return null
 
         val candidates = (getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl) +
             getLegacyChapterDirNames(chapterName, chapterScanlator, chapterUrl)
