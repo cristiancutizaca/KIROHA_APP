@@ -19,6 +19,7 @@ fun List<Chapter>.filterDownloaded(manga: Manga, downloadCache: MangaDownloadCac
             manga.title,
             manga.source,
             false,
+            manga.url,
         )
     }
 }
