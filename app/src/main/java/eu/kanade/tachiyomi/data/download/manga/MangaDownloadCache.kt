@@ -55,6 +55,9 @@ import tachiyomi.domain.storage.service.StorageManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 
@@ -104,6 +107,22 @@ class MangaDownloadCache(
     private val rootDownloadsDirMutex = Mutex()
     private var rootDownloadsDir = RootDirectory(storageManager.getDownloadsDirectory())
 
+    // Never guess legacy ownership from the visible title. Verify only individual
+    // chapters on Dispatchers.IO, serially, to avoid hammering the user's SD card.
+    private data class LegacyChapterKey(
+        val chapterName: String,
+        val chapterScanlator: String?,
+        val chapterUrl: String,
+        val mangaTitle: String,
+        val mangaUrl: String,
+        val sourceId: Long,
+    )
+
+    private val legacyResults = ConcurrentHashMap<LegacyChapterKey, Boolean>()
+    private val legacyInFlight = ConcurrentHashMap.newKeySet<LegacyChapterKey>()
+    private val legacyProbeLimit = Semaphore(1)
+    private var legacyNotificationJob: Job? = null
+
     init {
         // Attempt to read cache file
         scope.launchIO {
@@ -146,28 +165,54 @@ class MangaDownloadCache(
         skipCache: Boolean,
         mangaUrl: String? = null,
     ): Boolean {
-        // Reject ambiguous, title-only lookups: they could belong to any gallery.
         if (mangaUrl.isNullOrBlank()) return false
         if (skipCache) {
             val source = sourceManager.getOrStub(sourceId)
             return provider.findChapterDir(
-                chapterName,
-                chapterScanlator,
-                chapterUrl,
-                mangaTitle,
-                source,
-                mangaUrl,
+                chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
             ) != null
         }
 
         renewCache()
+        val mangaDir = rootDownloadsDir.sourceDirs[sourceId]
+            ?.mangaDirs?.get(provider.getMangaDirName(mangaTitle, mangaUrl, sourceId))
+        if (mangaDir != null && provider.getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl)
+                .any { it in mangaDir.chapterDirs }) return true
 
-        val sourceDir = rootDownloadsDir.sourceDirs[sourceId]
-        if (sourceDir != null) {
-            val mangaDir = sourceDir.mangaDirs[provider.getMangaDirName(mangaTitle, mangaUrl, sourceId)]
-            if (mangaDir != null) {
-                return provider.getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl)
-                    .any { it in mangaDir.chapterDirs }
+        val key = LegacyChapterKey(chapterName, chapterScanlator, chapterUrl, mangaTitle, mangaUrl, sourceId)
+        legacyResults[key]?.let { return it }
+
+        if (legacyInFlight.add(key)) {
+            scope.launchIO {
+                try {
+                    // Extension sources must be initialized before trying to validate
+                    // ComicInfo chapter URLs. A stub must not cache a false result.
+                    extensionManager.isInitialized.first { it }
+                    sourceManager.isInitialized.first { it }
+                    val found = legacyProbeLimit.withPermit {
+                        val source = sourceManager.getOrStub(sourceId)
+                        provider.findVerifiedLegacyChapterDir(
+                            chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
+                        ) != null
+                    }
+                    legacyResults[key] = found
+                    if (found) {
+                        // Coalesce UI refreshes: finding hundreds of existing files
+                        // must not trigger hundreds of simultaneous recompositions.
+                        legacyNotificationJob?.cancel()
+                        legacyNotificationJob = scope.launchIO {
+                            delay(500L)
+                            _changes.send(Unit)
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    logcat(LogPriority.WARN, error) { "Legacy manga chapter validation failed" }
+                    legacyResults[key] = false
+                } finally {
+                    legacyInFlight.remove(key)
+                }
             }
         }
         return false
@@ -345,6 +390,7 @@ class MangaDownloadCache(
     }
 
     fun invalidateCache() {
+        legacyResults.clear()
         lastRenew = 0L
         renewalJob?.cancel()
         diskCacheFile.delete()
