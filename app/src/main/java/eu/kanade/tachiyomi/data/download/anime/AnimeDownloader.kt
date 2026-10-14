@@ -235,18 +235,22 @@ class AnimeDownloader(
 
             // Use supervisorScope to cancel child jobs when the downloader job is cancelled
             supervisorScope {
-                val downloadJobs = mutableMapOf<AnimeDownload, Job>()
+                // AnimeDownload is a data class with a mutable video property.
+                // Using it as a HashMap key corrupts the map when the hoster is resolved,
+                // potentially spawning duplicate jobs for the same episode.
+                val downloadJobs = mutableMapOf<Long, Job>()
 
                 activeDownloadsFlow.collectLatest { activeDownloads ->
-                    val downloadJobsToStop = downloadJobs.filter { it.key !in activeDownloads }
-                    downloadJobsToStop.forEach { (download, job) ->
+                    val activeEpisodeIds = activeDownloads.mapTo(hashSetOf()) { it.episode.id }
+                    val downloadJobsToStop = downloadJobs.filterKeys { it !in activeEpisodeIds }
+                    downloadJobsToStop.forEach { (episodeId, job) ->
                         job.cancel()
-                        downloadJobs.remove(download)
+                        downloadJobs.remove(episodeId)
                     }
 
-                    val downloadsToStart = activeDownloads.filter { it !in downloadJobs }
+                    val downloadsToStart = activeDownloads.filter { it.episode.id !in downloadJobs }
                     downloadsToStart.forEach { download ->
-                        downloadJobs[download] = launchDownloadJob(download)
+                        downloadJobs[download.episode.id] = launchDownloadJob(download)
                     }
                 }
             }
@@ -298,7 +302,6 @@ class AnimeDownloader(
         if (episodes.isEmpty()) return
 
         val source = sourceManager.get(anime.source) as? AnimeHttpSource ?: return
-        val wasEmpty = queueState.value.isEmpty()
 
         val episodesToQueue = episodes.asSequence()
             // Filter out those already downloaded.
@@ -314,8 +317,9 @@ class AnimeDownloader(
         if (episodesToQueue.isNotEmpty()) {
             addAllToQueue(episodesToQueue)
 
-            // Start downloader if needed
-            if (autoStart && wasEmpty) {
+            // Also restart an idle queue (e.g. after individual episode errors).
+            // A queue containing old ERROR entries must not block newly enqueued work.
+            if (autoStart && !isRunning) {
                 val queuedDownloads =
                     queueState.value.count { it: AnimeDownload -> it.source !is UnmeteredSource }
                 val maxDownloadsFromSource = queueState.value
