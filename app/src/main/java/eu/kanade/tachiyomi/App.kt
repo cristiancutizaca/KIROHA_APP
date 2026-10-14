@@ -897,7 +897,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         val relativePath = chapterDir?.let {
             listOf(
                 mangaDownloadProvider.getSourceDirName(download.source),
-                mangaDownloadProvider.getMangaDirName(download.manga.title),
+                mangaDownloadProvider.getMangaDirName(
+                    download.manga.title,
+                    download.manga.url,
+                    download.source.id,
+                ),
                 mangaDownloadProvider.getChapterDirName(download.chapter.name, download.chapter.scanlator, download.chapter.url),
             ).joinToString("/")
         }
