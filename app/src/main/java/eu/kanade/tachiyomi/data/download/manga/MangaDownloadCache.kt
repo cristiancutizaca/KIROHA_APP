@@ -144,7 +144,7 @@ class MangaDownloadCache(
         mangaTitle: String,
         sourceId: Long,
         skipCache: Boolean,
-        mangaUrl: String?,
+        mangaUrl: String? = null,
     ): Boolean {
         // Reject ambiguous, title-only lookups: they could belong to any gallery.
         if (mangaUrl.isNullOrBlank()) return false
