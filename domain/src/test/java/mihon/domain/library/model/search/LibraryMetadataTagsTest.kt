@@ -93,6 +93,24 @@ class LibraryMetadataTagsTest {
     }
 
     @Test
+    fun findsGalleryTagsWithUnderscoresOrHyphens() {
+        assertTrue(
+            LibraryMetadataTags.matches(
+                value = "grand blue",
+                category = "parody",
+                genres = listOf("parody:grand_blue"),
+            ),
+        )
+        assertTrue(
+            LibraryMetadataTags.matches(
+                value = "grand blue",
+                category = "character",
+                descriptions = listOf("character: <grand-blue>"),
+            ),
+        )
+    }
+
+    @Test
     fun parsesTypedMultiwordLibrarySearches() {
         val query = QueryNode.from("""parody:"grand blue" character:Endministrator""")
         assertEquals(
