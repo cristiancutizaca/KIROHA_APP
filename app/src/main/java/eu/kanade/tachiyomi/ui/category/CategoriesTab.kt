@@ -46,6 +46,11 @@ data object CategoriesTab : Tab {
         }
 
     private val switchToMangaCategoryTabChannel = Channel<Unit>(1, BufferOverflow.DROP_OLDEST)
+    private val switchToAnimeCategoryTabChannel = Channel<Unit>(1, BufferOverflow.DROP_OLDEST)
+
+    fun showAnimeCategory() {
+        switchToAnimeCategoryTabChannel.trySend(Unit)
+    }
 
     fun showMangaCategory() {
         switchToMangaCategoryTabChannel.trySend(Unit)
@@ -77,8 +82,14 @@ data object CategoriesTab : Tab {
             // KMK <--
         )
         LaunchedEffect(Unit) {
-            switchToMangaCategoryTabChannel.receiveAsFlow()
-                .collectLatest { state.scrollToPage(1) }
+            launch {
+                switchToAnimeCategoryTabChannel.receiveAsFlow()
+                    .collectLatest { state.scrollToPage(0) }
+            }
+            launch {
+                switchToMangaCategoryTabChannel.receiveAsFlow()
+                    .collectLatest { state.scrollToPage(1) }
+            }
         }
 
         LaunchedEffect(Unit) {
