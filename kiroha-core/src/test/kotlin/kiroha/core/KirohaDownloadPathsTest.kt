@@ -1,9 +1,9 @@
 package kiroha.core
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Test
 
 class KirohaDownloadPathsTest {
     @Test
@@ -23,8 +23,16 @@ class KirohaDownloadPathsTest {
     }
 
     @Test
+    fun chaptersFromDifferentMangaWithSameRelativeChapterUrlAreNotEqual() {
+        assertNotEquals(
+            KirohaIdentity.mangaChapter("100", "/series/1", "/chapter/1"),
+            KirohaIdentity.mangaChapter("100", "/series/2", "/chapter/1"),
+        )
+    }
+
+    @Test
     fun emptyUrlIsNotAValidDownloadIdentity() {
-        assertFailsWith<IllegalArgumentException> {
+        assertThrows(IllegalArgumentException::class.java) {
             KirohaDownloadPaths.mangaSuffix(100L, "")
         }
     }
