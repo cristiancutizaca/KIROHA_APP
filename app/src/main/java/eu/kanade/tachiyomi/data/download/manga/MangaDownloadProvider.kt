@@ -180,10 +180,10 @@ class MangaDownloadProvider(
         if (!chapterScanlator.isNullOrBlank()) {
             dirName = chapterScanlator + "_" + dirName
         }
-        // Subtract 7 bytes for hash and underscore, 4 bytes for .cbz
-        dirName = DiskUtil.buildValidFilename(dirName, DiskUtil.MAX_FILE_NAME_BYTES - 11, disallowNonAsciiFilenames)
+        // Reserve 12 hex digits + underscore and the 4-byte .cbz extension.
+        dirName = DiskUtil.buildValidFilename(dirName, DiskUtil.MAX_FILE_NAME_BYTES - 17, disallowNonAsciiFilenames)
         if (includeHash) {
-            dirName += "_" + md5(chapterUrl).take(6)
+            dirName += "_" + md5(chapterUrl).take(12)
         }
         return dirName
     }
