@@ -49,7 +49,7 @@ object LibraryMetadataTags {
         val namespace = category?.lowercase()
         val allTags = namespace == null || namespace == "tag" || namespace == "genre"
 
-        if (allTags && genres.any { it.contains(value, ignoreCase = true) }) {
+        if (allTags && genres.any { matchesTagValue(it, value) }) {
             return true
         }
 
@@ -58,8 +58,16 @@ object LibraryMetadataTags {
                 val label = match.groupValues[1].lowercase().trim()
                 val isAllowed = if (allTags) label in tagCategories else label == namespace
 
-                isAllowed && match.groupValues[2].contains(value, ignoreCase = true)
+                isAllowed && matchesTagValue(match.groupValues[2], value)
             }
         }
     }
+    private fun matchesTagValue(text: String, value: String): Boolean {
+        if (text.contains(value, ignoreCase = true)) return true
+
+        // Some extensions preserve gallery tag slugs with underscores or hyphens.
+        fun normalize(input: String) = input.replace('_', ' ').replace('-', ' ')
+        return normalize(text).contains(normalize(value), ignoreCase = true)
+    }
+
 }
