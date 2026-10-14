@@ -20,8 +20,8 @@ android {
     defaultConfig {
         applicationId = "app.kiroha.mobile"
 
-        versionCode = 146
-        versionName = "0.1.2"
+        versionCode = 147
+        versionName = "0.1.3"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getLatestCommitSha()}\"")
