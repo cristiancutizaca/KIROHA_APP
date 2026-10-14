@@ -6,6 +6,7 @@ import tachiyomi.core.common.util.lang.withNonCancellableContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.anime.repository.AnimeCategoryRepository
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.library.anime.model.AnimeLibraryGroup
 import tachiyomi.domain.library.service.LibraryPreferences
 
 @Inject
@@ -33,6 +34,10 @@ class CreateAnimeCategoryWithName(
 
         try {
             categoryRepository.insertAnimeCategory(newCategory)
+            // A newly created anime folder must be visible immediately, regardless
+            // of the previous virtual grouping or hidden-tabs preference.
+            preferences.groupAnimeLibraryBy.set(AnimeLibraryGroup.BY_DEFAULT)
+            preferences.categoryTabs.set(true)
             Result.Success
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
