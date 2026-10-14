@@ -22,6 +22,14 @@ Actualizado: 13/10/2026. **Rama de trabajo: `main`. Cambios de fuente aplicados,
 - **Crash/branding:** fallos de copia mpv aislados; registros privados mínimos de actividad en DEBUG (tipo de Browse, momento de segundo plano, memoria utilizada), sin URLs/tokens; nuevos recursos vectoriales Kiroha para iconos adaptativos en Android moderno.
 - **Actualización:** versionCode 144. El `applicationId` sigue siendo `app.kiroha.mobile`; DEBUG usa `.dev`.
 
+
+## Corrección propuesta en rama `fix/download-identity-by-source-and-url-20261014`
+
+- Un nombre/título NO identifica una obra. Las nuevas rutas de manga se separan por ID de fuente + URL canónica de manga, y los capítulos se guardan siempre con hash de URL, incluso si antes estaba deshabilitada esa opción.
+- Se modificó el caché y los indicadores de lectura/biblioteca/actualizaciones para usar esa identidad. El identificador del progreso Kiroha incluye tanto URL de obra como de capítulo para evitar colisiones entre obras con capítulos relativos idénticos.
+- **Migración pendiente por seguridad:** las carpetas antiguas `Fuente/Título/Capítulo` o sin hash de URL se conservan en disco, pero no se adjudican automáticamente a una obra. En títulos repetidos no hay manera segura de saber a cuál pertenecen. Por tanto las descargas anteriores pueden mostrarse temporalmente como no descargadas hasta una migración explícita y verificada. **No borrar carpetas antiguas ni reinstalar sin respaldo.**
+- La corrección está en rama de revisión, **NO equivale a APK probada**. Falta compilar, ejecutar tests y probar dos galerías de mismo título con diferente cantidad de páginas en teléfonos reales. Los checks CI están pendientes.
+
 ## NO está demostrado / pendiente
 
 - **La causa exacta del cierre desde extensiones NO ha sido demostrada ni corregida con certeza.** Requiere logcat del teléfono y repetición con una APK compilada.
