@@ -793,6 +793,7 @@ class MangaViewModel(
                     chapter.url,
                     manga.title,
                     manga.source,
+                    mangaUrl = manga.url,
                 )
             }
             val downloadState = when {
