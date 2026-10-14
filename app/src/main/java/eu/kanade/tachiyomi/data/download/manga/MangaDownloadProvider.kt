@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.util.lang.Hash.md5
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import kiroha.core.KirohaDownloadPaths
 import logcat.LogPriority
+import mihon.core.archive.archiveReader
 import org.xmlpull.v1.XmlPullParser
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.displayablePath
@@ -199,15 +200,36 @@ class MangaDownloadProvider(
                     xml != null && xml.isFile && xml.length() in 1..MAX_LEGACY_XML_BYTES &&
                         xml.openInputStream().use { input -> comicInfoMatches(input, expectedUrl) }
                 }
-                // ZipFile reads the central directory without streaming a giant CBZ.
-                // SAF/content:// CBZs without random access need manual recovery.
-                file.isFile && file.name?.endsWith(".cbz", ignoreCase = true) == true &&
-                    file.uri.scheme == "file" -> {
-                    val path = file.uri.path ?: return false
-                    ZipFile(File(path)).use { zip ->
-                        val xml = zip.getEntry("ComicInfo.xml")
-                        xml != null && xml.size in 1..MAX_LEGACY_XML_BYTES &&
-                            zip.getInputStream(xml).use { input -> comicInfoMatches(input, expectedUrl) }
+                file.isFile && file.name?.endsWith(".cbz", ignoreCase = true) == true -> {
+                    // Android document providers expose content:// URIs, not real file
+                    // paths. Use the existing archive reader (mmap + libarchive):
+                    // it can read ComicInfo.xml without copying a multi-GB CBZ to
+                    // temporary storage.
+                    if (file.uri.scheme == "file") {
+                        val path = file.uri.path ?: return false
+                        ZipFile(File(path)).use { zip ->
+                            val xml = zip.getEntry("ComicInfo.xml")
+                            xml != null && xml.size in 1..MAX_LEGACY_XML_BYTES &&
+                                zip.getInputStream(xml).use { input -> comicInfoMatches(input, expectedUrl) }
+                        }
+                    } else {
+                        file.archiveReader(context).use { reader ->
+                            reader.getInputStream("ComicInfo.xml")?.use { input ->
+                                // A broken or hostile archive must not make us
+                                // decode unbounded XML into memory.
+                                val buffer = ByteArray(8192)
+                                val xml = java.io.ByteArrayOutputStream()
+                                while (xml.size() <= MAX_LEGACY_XML_BYTES) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    xml.write(buffer, 0, read)
+                                }
+                                xml.size() in 1..MAX_LEGACY_XML_BYTES &&
+                                    java.io.ByteArrayInputStream(xml.toByteArray()).use { bytes ->
+                                        comicInfoMatches(bytes, expectedUrl)
+                                    }
+                            } ?: false
+                        }
                     }
                 }
                 else -> false
