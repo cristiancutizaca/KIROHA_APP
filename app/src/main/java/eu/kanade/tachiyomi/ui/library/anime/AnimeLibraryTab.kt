@@ -346,10 +346,7 @@ data object AnimeLibraryTab : Tab {
                     onDismissRequest = categoryScreenModel::dismissDialog,
                     onCreate = { name ->
                         categoryScreenModel.createCategory(name)
-                        // Show user-defined folders immediately after creation,
-                        // even if the library had been grouped by source or status.
-                        settingsViewModel.setGrouping(AnimeLibraryGroup.BY_DEFAULT)
-                        settingsViewModel.libraryPreferences.categoryTabs.set(true)
+                        viewModel.activeCategoryIndex = 0
                     },
                     categories = categoryState.categories.map { it.name },
                 )
