@@ -127,6 +127,10 @@ class MangaDownloader(
 
     // The worker must wait for on-disk queue restoration before deciding it is empty.
     private val restorationJob: Job = scope.launch {
+        // The installed extension registry is populated asynchronously.
+        // Restoring before it is initialized drops every saved task whose
+        // source is not yet visible, making the queue look empty on relaunch.
+        sourceManager.isInitialized.first { it }
         val restored = store.restore()
         restored.forEach { it.status = MangaDownload.State.QUEUE }
         // These items are already durable; do not rewrite 1,000 preference entries
