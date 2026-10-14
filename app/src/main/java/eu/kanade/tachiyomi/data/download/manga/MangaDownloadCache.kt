@@ -57,6 +57,7 @@ import uy.kohesive.injekt.api.get
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlin.time.Duration.Companion.hours
@@ -122,6 +123,7 @@ class MangaDownloadCache(
     private val legacyResults = ConcurrentHashMap<LegacyChapterKey, Boolean>()
     private val legacyInFlight = ConcurrentHashMap.newKeySet<LegacyChapterKey>()
     private val pendingLegacyChecks = AtomicInteger(0)
+    private val legacyGeneration = AtomicLong(0)
     private val legacyProbeLimit = Semaphore(1)
     private var legacyNotificationJob: Job? = null
 
@@ -196,6 +198,7 @@ class MangaDownloadCache(
                 legacyInFlight.remove(key)
                 return false
             }
+            val generation = legacyGeneration.get()
             scope.launchIO {
                 try {
                     // Extension sources must be initialized before trying to validate
@@ -208,6 +211,7 @@ class MangaDownloadCache(
                             chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
                         ) != null
                     }
+                    if (generation != legacyGeneration.get()) return@launchIO
                     legacyResults[key] = found
                     if (found) {
                         // Coalesce UI refreshes: finding hundreds of existing files
@@ -222,7 +226,7 @@ class MangaDownloadCache(
                     throw cancelled
                 } catch (error: Exception) {
                     logcat(LogPriority.WARN, error) { "Legacy manga chapter validation failed" }
-                    legacyResults[key] = false
+                    if (generation == legacyGeneration.get()) legacyResults[key] = false
                 } finally {
                     legacyInFlight.remove(key)
                     pendingLegacyChecks.decrementAndGet()
@@ -404,6 +408,7 @@ class MangaDownloadCache(
     }
 
     fun invalidateCache() {
+        legacyGeneration.incrementAndGet()
         legacyResults.clear()
         provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
