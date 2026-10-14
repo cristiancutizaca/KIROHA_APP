@@ -208,7 +208,10 @@ data object AnimeLibraryTab : Tab {
                     onClickCreateCategory = {
                         categoryScreenModel.showDialog(AnimeCategoryDialog.Create)
                     },
-                    onClickManageCategories = { navigator.push(CategoriesTab) },
+                    onClickManageCategories = {
+                        CategoriesTab.showAnimeCategory()
+                        navigator.push(CategoriesTab)
+                    },
                     searchQuery = state.searchQuery,
                     onSearchQueryChange = viewModel::search,
                     scrollBehavior = scrollBehavior.takeIf { !tabVisible }, // For scroll overlay when no tab
@@ -312,6 +315,7 @@ data object AnimeLibraryTab : Tab {
                     onDismissRequest = onDismissRequest,
                     onEditCategories = {
                         viewModel.clearSelection()
+                        CategoriesTab.showAnimeCategory()
                         navigator.push(CategoriesTab)
                     },
                     onConfirm = { include, exclude ->
