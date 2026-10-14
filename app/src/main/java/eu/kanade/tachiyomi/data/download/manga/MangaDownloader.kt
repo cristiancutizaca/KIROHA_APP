@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.download.manga
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import aniyomi.util.DataSaver
 import aniyomi.util.DataSaver.Companion.getImage
 import com.hippo.unifile.UniFile
@@ -231,7 +232,7 @@ class MangaDownloader(
                         // The previous per-source limit multiplied by five sources, causing
                         // up to 25 simultaneous chapter jobs (each fetching multiple pages).
                         // Enforce one global cap to reduce CPU, network and thermal load.
-                        .take(minOf(downloadPreferences.numberOfDownloads.get().coerceIn(1, 5), thermalChapterLimit()))
+                        .take(minOf(downloadPreferences.numberOfDownloads.get().coerceIn(1, 5), thermalChapterLimit(), MAX_CONCURRENT_CHAPTERS))
                     emit(activeDownloads)
 
                     if (activeDownloads.isEmpty()) break
@@ -411,8 +412,9 @@ class MangaDownloader(
             // Start downloading images, consider we can have downloaded images already
             // A few chapters can fetch many pages concurrently; throttle per chapter
             // when the OS reports a hot device instead of multiplying socket load.
+            var lastNotificationAt = 0L
             pageList.asFlow()
-                .flatMapMerge(concurrency = if (thermalChapterLimit() == 1) 1 else 2) { page ->
+                .flatMapMerge(concurrency = if (thermalChapterLimit() <= 2) 1 else 2) { page ->
                     flow {
                         // Keep completed images offline: do not call the extension
                         // for image URLs that already exist in the restored temp folder.
@@ -435,9 +437,15 @@ class MangaDownloader(
                     }.flowOn(Dispatchers.IO)
                 }
                 .collect {
-                    // Do when page is downloaded.
-                    notifier.onProgressChange(download)
+                    // Avoid hundreds of notification updates and full page-status
+                    // recounts per chapter. Final state is always sent below.
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastNotificationAt >= PROGRESS_NOTIFICATION_INTERVAL_MS) {
+                        lastNotificationAt = now
+                        notifier.onProgressChange(download)
+                    }
                 }
+            notifier.onProgressChange(download)
 
             // Do after download completes
             if (!isDownloadSuccessful(download, tmpDir)) {
@@ -825,6 +833,8 @@ class MangaDownloader(
     }
 
     companion object {
+        private const val MAX_CONCURRENT_CHAPTERS = 2
+        private const val PROGRESS_NOTIFICATION_INTERVAL_MS = 1_000L
         const val TMP_DIR_SUFFIX = "_tmp"
         const val WARNING_NOTIF_TIMEOUT_MS = 30_000L
         const val CHAPTERS_PER_SOURCE_QUEUE_WARNING_THRESHOLD = 15
