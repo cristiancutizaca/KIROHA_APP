@@ -488,8 +488,6 @@ class AnimeDownloader(
             video.videoUrl = file.uri.path ?: ""
             download.progress = 100
             video.status = Video.State.READY
-            httpServer?.stop()
-            progressJob?.cancel()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             video.status = Video.State.ERROR
@@ -631,7 +629,11 @@ class AnimeDownloader(
             }
         }
 
-        duration = getDuration(ffprobeCommand(video.videoUrl, headerOptions))?.toLong() ?: 0L
+        // Duration probing is only used for displaying progress. Some hosters
+        // reject ffprobe even when FFmpeg can download the stream successfully.
+        duration = runCatching {
+            getDuration(ffprobeCommand(video.videoUrl, headerOptions))?.toLong()
+        }.getOrNull() ?: 0L
 
         suspendCancellableCoroutine { continuation ->
             val session = FFmpegKit.executeWithArgumentsAsync(
@@ -850,7 +852,6 @@ class AnimeDownloader(
     /**
      * Checks if the download was successful.
      *
-     * @param download the download to check.
      * @param tmpDir the directory where the download is currently stored.
      */
     private fun isDownloadSuccessful(tmpDir: UniFile): Boolean {
