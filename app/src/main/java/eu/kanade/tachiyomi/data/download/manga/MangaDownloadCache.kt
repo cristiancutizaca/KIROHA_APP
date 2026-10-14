@@ -56,6 +56,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlin.time.Duration.Companion.hours
@@ -120,8 +121,13 @@ class MangaDownloadCache(
 
     private val legacyResults = ConcurrentHashMap<LegacyChapterKey, Boolean>()
     private val legacyInFlight = ConcurrentHashMap.newKeySet<LegacyChapterKey>()
+    private val pendingLegacyChecks = AtomicInteger(0)
     private val legacyProbeLimit = Semaphore(1)
     private var legacyNotificationJob: Job? = null
+
+    private companion object {
+        const val MAX_PENDING_LEGACY_CHECKS = 24
+    }
 
     init {
         // Attempt to read cache file
@@ -183,6 +189,13 @@ class MangaDownloadCache(
         legacyResults[key]?.let { return it }
 
         if (legacyInFlight.add(key)) {
+            // A library can present thousands of chapters at once. Avoid
+            // scheduling thousands of coroutines waiting on one SD card.
+            if (pendingLegacyChecks.incrementAndGet() > MAX_PENDING_LEGACY_CHECKS) {
+                pendingLegacyChecks.decrementAndGet()
+                legacyInFlight.remove(key)
+                return false
+            }
             scope.launchIO {
                 try {
                     // Extension sources must be initialized before trying to validate
@@ -212,6 +225,7 @@ class MangaDownloadCache(
                     legacyResults[key] = false
                 } finally {
                     legacyInFlight.remove(key)
+                    pendingLegacyChecks.decrementAndGet()
                 }
             }
         }
@@ -391,6 +405,7 @@ class MangaDownloadCache(
 
     fun invalidateCache() {
         legacyResults.clear()
+        provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
         renewalJob?.cancel()
         diskCacheFile.delete()
