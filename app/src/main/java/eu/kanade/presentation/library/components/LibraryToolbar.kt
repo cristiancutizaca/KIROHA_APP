@@ -43,6 +43,8 @@ fun LibraryToolbar(
     scrollBehavior: TopAppBarScrollBehavior?,
     navigateUp: (() -> Unit)? = null,
     onClickReindexDownloads: (() -> Unit)? = null,
+    onClickCreateCategory: (() -> Unit)? = null,
+    onClickManageCategories: (() -> Unit)? = null,
 ) = when {
     selectedCount > 0 -> LibrarySelectionToolbar(
         selectedCount = selectedCount,
@@ -62,6 +64,8 @@ fun LibraryToolbar(
         onClickOpenRandomEntry = onClickOpenRandomEntry,
         onClickSyncNow = onClickSyncNow,
         onClickReindexDownloads = onClickReindexDownloads,
+        onClickCreateCategory = onClickCreateCategory,
+        onClickManageCategories = onClickManageCategories,
         scrollBehavior = scrollBehavior,
         navigateUp = navigateUp,
     )
@@ -79,6 +83,8 @@ private fun LibraryRegularToolbar(
     onClickOpenRandomEntry: () -> Unit,
     onClickSyncNow: () -> Unit,
     onClickReindexDownloads: (() -> Unit)?,
+    onClickCreateCategory: (() -> Unit)?,
+    onClickManageCategories: (() -> Unit)?,
     scrollBehavior: TopAppBarScrollBehavior?,
     navigateUp: (() -> Unit)?,
 ) {
@@ -130,6 +136,18 @@ private fun LibraryRegularToolbar(
                         onClick = onClickSyncNow,
                     ),
                 ) + listOfNotNull(
+                    onClickCreateCategory?.let {
+                        AppBar.OverflowAction(
+                            title = stringResource(MR.strings.action_add_category),
+                            onClick = it,
+                        )
+                    },
+                    onClickManageCategories?.let {
+                        AppBar.OverflowAction(
+                            title = stringResource(MR.strings.action_edit_categories),
+                            onClick = it,
+                        )
+                    },
                     onClickReindexDownloads?.let {
                         AppBar.OverflowAction(
                             title = "Reindexar descargas",
