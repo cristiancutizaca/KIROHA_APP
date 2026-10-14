@@ -90,7 +90,7 @@ class AnimeDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
             try {
                 // Suspending wait, not a busy spin or an indefinitely joined monitoring scope.
                 while (!isStopped && downloadManager.isRunning && networkCheck) {
-                    delay(500L)
+                    delay(1_500L)
                 }
                 // Offline interruptions preserve the queue and reschedule pending work.
                 if (!networkCheck && downloadManager.queueState.value.isNotEmpty()) {
