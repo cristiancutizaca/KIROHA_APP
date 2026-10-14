@@ -216,7 +216,7 @@ class AnimeDownloader(
                             it.status.value <= AnimeDownload.State.DOWNLOADING.value
                         } // Ignore completed downloads, leave them in the queue
                         .groupBy { it.source }
-                        .toList().take(2) // Limit simultaneous video downloads to reduce thermal and I/O load
+                        .toList().take(1) // A single large video stream avoids competing with manga, SAF and FFmpeg.
                         .map { (_, downloads) -> downloads.first() }
                     emit(activeDownloads)
 
