@@ -56,7 +56,7 @@ internal class DownloadPageLoader(
     }
 
     private suspend fun indexedChapterPath(): UniFile? {
-        val itemId = "manga:${source.id}:${chapter.chapter.url}"
+        val itemId = kiroha.core.KirohaIdentity.mangaChapter(source.id.toString(), manga.url, chapter.chapter.url)
         val deviceId = DeviceRegistry(AndroidKeyValueStore(context)).load()?.deviceId ?: return null
         val record = kirohaDatabaseRepository.downloadsForItem(itemId).firstOrNull {
             it.deviceId == deviceId &&
