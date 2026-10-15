@@ -1082,19 +1082,19 @@
 
     <!-- Notes screen -->
     <string name="notes_placeholder">Enjoyed the part where…</string>
-    <string name="supportUsScreen.perks">Patrons get access to exclusive channels, with more perks to come.</string>
-    <string name="supportUsScreen.donationPlatform.patreon">Patreon (preferred)</string>
-    <string name="supportUsScreen.donationPlatform.opencollective">OpenCollective</string>
-    <string name="supportUsScreen.currentlySupportedBy">Animetail is currently backed by %d+ patrons. We want to thank each and everyone of you. Let's make Animetail even better together.</string>
-    <string name="supportUsScreen.contactForDetailsMessage">For alternative options or any related questions, join our Discord server.</string>
-    <string name="supportUsScreen.contactPlatform">Discord</string>
+    <string name="supportUsScreen.perks">KIROHA is an open-source project. You can review the code, report issues and contribute improvements.</string>
+    <string name="supportUsScreen.donationPlatform.patreon">Project repository</string>
+    <string name="supportUsScreen.donationPlatform.opencollective">Issues and suggestions</string>
+    <string name="supportUsScreen.currentlySupportedBy">KIROHA grows through community feedback and source contributions.</string>
+    <string name="supportUsScreen.contactForDetailsMessage">For questions and suggestions, open a GitHub issue.</string>
+    <string name="supportUsScreen.contactPlatform">GitHub</string>
 
-    <string name="donationCampaign.title">Enjoying the app?</string>
-    <string name="donationCampaign.paragraph1">Hi! I’m the main developer behind Animetail, and I’d like to ask you to consider supporting its development financially. With enough support, I’ll be able to work on Animetail full-time and focus on long-standing issues as well as highly requested features.</string>
-    <string name="donationCampaign.paragraph2">You can donate through either Patreon (preferred) or OpenCollective. If you have questions or would like to support using alternative methods, feel free to reach out to me through Animetail's Discord server.</string>
-    <string name="donationCampaign.paragraph3">Regardless, Animetail will continue to be maintained by me and the volunteers, and it will stay open source.</string>
-    <string name="donationCampaign.contactPlatform">Discord</string>
-    <string name="donationCampaign.dismiss">Dismiss</string>
+    <string name="donationCampaign.title">Welcome to KIROHA</string>
+    <string name="donationCampaign.paragraph1">Your library and local files are yours. Explore KIROHA's open-source development on GitHub.</string>
+    <string name="donationCampaign.paragraph2">You can submit bug reports or ideas on the KIROHA repository.</string>
+    <string name="donationCampaign.paragraph3">KIROHA is an independent open-source project.</string>
+    <string name="donationCampaign.contactPlatform">GitHub</string>
+    <string name="donationCampaign.dismiss">Close</string>
 
     <string name="migrationConfigScreen.selectedHeader">Selected</string>
     <string name="migrationConfigScreen.availableHeader">Available</string>
