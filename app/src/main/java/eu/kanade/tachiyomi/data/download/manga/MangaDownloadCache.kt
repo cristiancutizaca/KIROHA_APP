@@ -470,28 +470,19 @@ class MangaDownloadCache(
                         batch.map { sourceDir ->
                             async {
                                 sourceDir.mangaDirs = sourceDir.dir?.listFiles().orEmpty()
-                                .filter { it.isDirectory && !it.name.isNullOrBlank() }
-                                .associate { it.name!! to MangaDirectory(it) }
-                            sourceDir.mangaDirs.values.forEach { mangaDir ->
-                                val chapterDirs = mangaDir.dir?.listFiles().orEmpty()
-                                    .mapNotNull {
-                                        when {
-                                            // Ignore incomplete downloads
-                                            it.name?.endsWith(MangaDownloader.TMP_DIR_SUFFIX) == true -> null
-
-                                            // Folder of images
-                                            it.isDirectory -> it.name
-
-                                            // CBZ files
+                                    .filter { it.isDirectory && !it.name.isNullOrBlank() }
+                                    .associate { it.name!! to MangaDirectory(it) }
+                                sourceDir.mangaDirs.values.forEach { itemDir ->
+                                    itemDir.chapterDirs = itemDir.dir?.listFiles().orEmpty()
+                                        .mapNotNull {
+                                            when {
+                                                it.name?.endsWith(MangaDownloader.TMP_DIR_SUFFIX) == true -> null
+                                                it.isDirectory -> it.name
                                             it.isFile && it.extension == "cbz" -> it.nameWithoutExtension
-
-                                            // Anything else is irrelevant
-                                            else -> null
+                                                else -> null
+                                            }
                                         }
-                                    }
-                                    .toMutableSet()
-
-                                    mangaDir.chapterDirs = chapterDirs
+                                        .toMutableSet()
                                 }
                             }
                         }.awaitAll()
