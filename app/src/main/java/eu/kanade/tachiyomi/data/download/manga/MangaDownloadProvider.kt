@@ -222,7 +222,7 @@ class MangaDownloadProvider(
             .filter { it.isDirectory && !it.name.isNullOrBlank() }
             .filter { dir ->
                 expectedLabels.any { label ->
-                    dir.name.orEmpty().replace(SOURCE_ID_SUFFIX, "").equals(label, ignoreCase = true)
+                    KirohaDownloadPaths.matchesSourceFolder(dir.name.orEmpty(), label)
                 }
             }
             .sortedWith(compareBy<UniFile> { it.name !in expectedLabels }.thenBy { it.name.orEmpty() })
@@ -303,7 +303,6 @@ class MangaDownloadProvider(
 
     private companion object {
         const val MAX_LEGACY_XML_BYTES = 512L * 1024
-        val SOURCE_ID_SUFFIX = Regex("__s_[0-9]+$")
     }
 
     /**
