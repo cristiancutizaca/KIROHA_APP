@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.extension
@@ -95,15 +95,22 @@ class MangaDownloadManager(
     }
 
     fun startDownloadNow(chapterId: Long) {
-        val existingDownload = getQueuedDownloadOrNull(chapterId)
-        // If not in queue try to start a new download
-        val toAdd = existingDownload ?: runBlocking { downloadFromChapterId(chapterId) } ?: return
-        queueState.value.toMutableList().apply {
-            existingDownload?.let { remove(it) }
-            add(0, toAdd)
-            reorderQueue(this)
+        // DB lookups are suspending. Blocking the UI until they complete can
+        // freeze the chapter screen, especially on slower storage.
+        scope.launchIO {
+            val toAdd = getQueuedDownloadOrNull(chapterId)
+                ?: downloadFromChapterId(chapterId)
+                ?: return@launchIO
+            // Queue mutations remain on the main thread, as required by the
+            // downloader. Re-read the queue to avoid using a stale snapshot.
+            withContext(Dispatchers.Main.immediate) {
+                val reordered = queueState.value.filterNot { it.chapter.id == chapterId }
+                    .toMutableList()
+                reordered.add(0, toAdd)
+                reorderQueue(reordered)
+                startDownloads()
+            }
         }
-        startDownloads()
     }
 
     private suspend fun downloadFromChapterId(chapterId: Long): MangaDownload? {
