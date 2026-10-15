@@ -151,11 +151,14 @@ class MangaDownloadProvider(
         // E-Hentai (EN) and E-Hentai (EN)__s_<id> are READ aliases.
         // Their labels only choose where to search. Each chapter MUST prove
         // its URL identity before a gallery can claim those existing files.
-        val oldTitle = DiskUtil.buildValidFilename(
-            mangaTitle,
-            DiskUtil.MAX_FILE_NAME_BYTES,
+        // The user may have changed the non-ASCII filename setting since
+        // downloading. Both historical sanitized names are valid read aliases.
+        val oldTitles = listOf(
             libraryPreferences.disallowNonAsciiFilenames.get(),
-        )
+            !libraryPreferences.disallowNonAsciiFilenames.get(),
+        ).map { asciiOnly ->
+            DiskUtil.buildValidFilename(mangaTitle, DiskUtil.MAX_FILE_NAME_BYTES, asciiOnly)
+        }.distinct()
         val candidates = (getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl) +
             getLegacyChapterDirNames(chapterName, chapterScanlator, chapterUrl)
                 .flatMap { listOf(it, "$it.cbz") }).distinct()
@@ -180,7 +183,9 @@ class MangaDownloadProvider(
             }.getOrNull()?.trim()?.trimEnd('/')?.let(::add)
         }.filter { it.isNotBlank() }.toSet()
 
-        return legacySourceFolders(root, source)[oldTitle].orEmpty().asSequence()
+        val sourceFolders = legacySourceFolders(root, source)
+        return oldTitles.asSequence()
+            .flatMap { sourceFolders[it].orEmpty().asSequence() }
             .flatMap { legacyMangaDir ->
                 candidates.asSequence().mapNotNull(legacyMangaDir::findFile)
             }
@@ -205,19 +210,22 @@ class MangaDownloadProvider(
         val rootUri = root.uri.toString()
         legacyFolderIndex[source.id]?.takeIf { it.rootUri == rootUri }?.let { return it.folders }
 
-        val expectedLabel = DiskUtil.buildValidFilename(
-            source.toString(),
-            DiskUtil.MAX_FILE_NAME_BYTES,
+        val expectedLabels = listOf(
             libraryPreferences.disallowNonAsciiFilenames.get(),
-        )
+            !libraryPreferences.disallowNonAsciiFilenames.get(),
+        ).map { asciiOnly ->
+            DiskUtil.buildValidFilename(source.toString(), DiskUtil.MAX_FILE_NAME_BYTES, asciiOnly)
+        }.distinct()
         // The numeric __s_ suffix identifies the source-storage namespace,
         // but the visible extension label remains the same.
         val sourceDirs = root.listFiles().orEmpty()
             .filter { it.isDirectory && !it.name.isNullOrBlank() }
             .filter { dir ->
-                dir.name.orEmpty().replace(SOURCE_ID_SUFFIX, "").equals(expectedLabel, ignoreCase = true)
+                expectedLabels.any { label ->
+                    dir.name.orEmpty().replace(SOURCE_ID_SUFFIX, "").equals(label, ignoreCase = true)
+                }
             }
-            .sortedWith(compareBy<UniFile> { it.name != expectedLabel }.thenBy { it.name.orEmpty() })
+            .sortedWith(compareBy<UniFile> { it.name !in expectedLabels }.thenBy { it.name.orEmpty() })
 
         val found = sourceDirs.asSequence()
             .flatMap { sourceDir ->
