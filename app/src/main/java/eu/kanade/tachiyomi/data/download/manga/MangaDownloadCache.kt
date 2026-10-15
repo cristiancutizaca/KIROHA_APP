@@ -47,7 +47,6 @@ import logcat.LogPriority
 import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.storage.nameWithoutExtension
 import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.entries.manga.model.Manga
 import tachiyomi.domain.items.chapter.model.Chapter
@@ -81,7 +80,7 @@ class MangaDownloadCache(
 ) {
 
     private val scope = CoroutineScope(Dispatchers.IO)
-    private val _changes: Channel<Unit> = Channel(Channel.UNLIMITED)
+    private val _changes: Channel<Unit> = Channel(Channel.CONFLATED)
     val changes = _changes.receiveAsFlow()
         .onStart { emit(Unit) }
         .flowOn(Dispatchers.IO)
@@ -525,9 +524,9 @@ class MangaDownloadCache(
     }
 
     private fun notifyChanges() {
-        scope.launchNonCancellable {
-            _changes.send(Unit)
-        }
+        // UI reads the latest download-index snapshot, not every intermediate
+        // event. Conflate updates instead of spawning one coroutine per change.
+        _changes.trySend(Unit)
         updateDiskCache()
     }
 
