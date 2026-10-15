@@ -178,7 +178,7 @@ fun MoreScreen(
             }
             item {
                 TextPreferenceWidget(
-                    title = stringResource(MR.strings.label_support_us),
+                    title = stringResource(MR.strings.kiroha_project_title),
                     icon = Icons.Outlined.Code,
                     onPreferenceClick = onClickSupport,
                 )
