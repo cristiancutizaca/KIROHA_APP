@@ -2,12 +2,10 @@ package eu.kanade.tachiyomi.ui.main
 
 import android.animation.ValueAnimator
 import android.app.Activity
-import android.app.Application
 import android.app.SearchManager
 import android.app.assist.AssistContent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -20,48 +18,31 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.unit.dp
 import androidx.core.animation.doOnEnd
 import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen
@@ -80,7 +61,6 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
 import eu.kanade.domain.source.anime.interactor.GetAnimeIncognitoState
 import eu.kanade.domain.source.manga.interactor.GetMangaIncognitoState
-import eu.kanade.presentation.components.AdaptiveSheet
 import eu.kanade.presentation.components.AppStateBanners
 import eu.kanade.presentation.components.DownloadedOnlyBannerBackgroundColor
 import eu.kanade.presentation.components.IncognitoModeBannerBackgroundColor
@@ -102,7 +82,6 @@ import eu.kanade.tachiyomi.data.download.anime.AnimeDownloadCache
 import eu.kanade.tachiyomi.data.download.manga.MangaDownloadCache
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.player.service.HttpServerService
-import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.data.updater.RELEASE_URL
 import eu.kanade.tachiyomi.extension.anime.api.AnimeExtensionApi
 import eu.kanade.tachiyomi.extension.manga.api.MangaExtensionApi
@@ -143,26 +122,19 @@ import mihon.app.di.AppGraph
 import mihon.app.di.appGraph
 import mihon.core.metro.metroGraph
 import mihon.core.migration.Migrator
-import mihon.feature.support.SupportUsScreen
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.entries.anime.interactor.GetAnime
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.release.interactor.GetApplicationRelease
-import tachiyomi.domain.source.anime.service.AnimeSourceManager
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.util.collectAsState
-import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.Instant
-import kotlin.time.times
 
 class MainActivity : BaseActivity() {
 
@@ -367,7 +339,6 @@ class MainActivity : BaseActivity() {
                     CheckForUpdates()
                 }
                 ShowOnboarding()
-                ShowDonationCampaign()
             }
 
             var showChangelog by remember { mutableStateOf(didMigration && !BuildConfig.DEBUG) }
@@ -489,126 +460,6 @@ class MainActivity : BaseActivity() {
         LaunchedEffect(Unit) {
             if (!preferences.shownOnboardingFlow.get() && navigator.lastItem !is OnboardingScreen) {
                 navigator.push(OnboardingScreen())
-            }
-        }
-    }
-
-    @Composable
-    private fun ShowDonationCampaign() {
-        val navigator = LocalNavigator.currentOrThrow
-
-        var showCampaign by remember { mutableStateOf(false) }
-        if (showCampaign) {
-            val uriHandler = LocalUriHandler.current
-            val dismissSupportMessage = {
-                preferences.donationCampaignShown.set(true)
-                showCampaign = false
-            }
-            AdaptiveSheet(
-                onDismissRequest = dismissSupportMessage,
-                enableImplicitDismiss = false,
-            ) {
-                Column {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Column(
-                        modifier = Modifier
-                            .verticalScroll(rememberScrollState())
-                            .padding(16.dp)
-                            .weight(1f, fill = false)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = stringResource(MR.strings.donationCampaign_title),
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.headlineSmall,
-                        )
-                        Text(
-                            text = stringResource(MR.strings.donationCampaign_paragraph1),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = stringResource(MR.strings.donationCampaign_paragraph2),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = stringResource(MR.strings.donationCampaign_paragraph3),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-
-                    HorizontalDivider()
-
-                    Button(
-                        modifier = Modifier
-                            .padding(top = MaterialTheme.padding.small)
-                            .padding(horizontal = MaterialTheme.padding.medium)
-                            .fillMaxWidth(),
-                        onClick = {
-                            navigator.push(SupportUsScreen())
-                            dismissSupportMessage()
-                        },
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.VolunteerActivism,
-                                contentDescription = null,
-                            )
-                            Text(
-                                text = stringResource(MR.strings.label_support_us),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                        modifier = Modifier
-                            .padding(bottom = MaterialTheme.padding.small)
-                            .padding(horizontal = MaterialTheme.padding.medium),
-                    ) {
-                        OutlinedButton(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            onClick = { uriHandler.openUri(Constants.URL_DISCORD) },
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                            ) {
-                                Text(
-                                    text = stringResource(MR.strings.donationCampaign_contactPlatform),
-                                )
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Default.OpenInNew,
-                                    contentDescription = null,
-                                )
-                            }
-                        }
-                        OutlinedButton(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            onClick = dismissSupportMessage,
-                        ) {
-                            Text(
-                                text = stringResource(MR.strings.donationCampaign_dismiss),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        LaunchedEffect(Unit) {
-            try {
-                val firstInstallTime = packageManager.getPackageInfo(packageName, 0).firstInstallTime
-                val eligibleTime = Instant.fromEpochMilliseconds(firstInstallTime).plus(6 * 30.days)
-                showCampaign = (Clock.System.now() >= eligibleTime && !preferences.donationCampaignShown.get())
-            } catch (_: PackageManager.NameNotFoundException) {
             }
         }
     }
