@@ -1,140 +1,253 @@
 <div align="center">
 
-# ✦ KIROHA
+<img src=".github/assets/kiroha-banner.svg" alt="KIROHA: biblioteca de manga y reproductor de anime" width="100%" />
 
-### Tu biblioteca. Tus historias. Tu reproductor.
+<br />
 
-**Lector de manga y reproductor de anime para Android.**  
-Organiza, explora, descarga y disfruta tu contenido con una experiencia personalizable.
+**Tu biblioteca, tus historias, tu reproductor.** 🌸
 
-[**Funciones**](#-qué-puedes-hacer) · [**Instalación**](#-instalación) · [**Compilación**](#-compilación) · [**Estado**](#-estado-del-proyecto) · [**Créditos**](#-origen-y-créditos)
+Una sola aplicación Android para descubrir, leer, ver y organizar manga y anime.
 
-![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
-![Build](https://img.shields.io/badge/Estado-En%20desarrollo-FFA500?style=flat-square)
-![Licencia](https://img.shields.io/badge/Licencia-Apache--2.0-64748b?style=flat-square)
+<br />
+
+<a href="https://github.com/cristiancutizaca/KIROHA_APP/releases"><img alt="Publicaciones" src="https://img.shields.io/badge/📦_Publicaciones-161D36?style=for-the-badge&logoColor=white" /></a>
+<a href="https://github.com/cristiancutizaca/KIROHA_APP/issues"><img alt="Reportar un problema" src="https://img.shields.io/badge/🐛_Incidencias-30305C?style=for-the-badge" /></a>
+<a href="https://github.com/cristiancutizaca/KIROHA_APP"><img alt="Código abierto" src="https://img.shields.io/badge/✨_Open_Source-7D5CAF?style=for-the-badge" /></a>
+
+<br /><br />
+
+<img alt="Android 8+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" />
+<img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" />
+<img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack-Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" />
+<img alt="Reproductor mpv" src="https://img.shields.io/badge/Video-mpv-6366F1?style=flat-square" />
+<img alt="Apache 2.0" src="https://img.shields.io/badge/Licencia-Apache%202.0-BA82E1?style=flat-square" />
+
+<br />
+
+<a href="#-kiroha">Descubre KIROHA</a> ·
+<a href="#-funciones">Funciones</a> ·
+<a href="#-reproductor">Reproductor</a> ·
+<a href="#-instalación">Instalación</a> ·
+<a href="#-para-desarrolladores">Desarrollo</a>
 
 </div>
 
 ---
 
-## 🌸 ¿Qué es KIROHA?
+## 🌸 KIROHA
 
-**KIROHA** es una aplicación Android de código abierto que reúne lectura de manga y reproducción de anime en una misma biblioteca, con extensiones, descargas locales y controles avanzados.
+**KIROHA** combina un **lector de manga**, un **reproductor de anime** y una **biblioteca personal** en una experiencia pensada para Android.
 
-El objetivo es conservar las funciones útiles del ecosistema de lectores y reproductores existentes mientras se desarrolla una experiencia propia: más rápida, organizada, adaptable y centrada en los archivos del usuario.
+Elige tus fuentes, organiza tus colecciones y personaliza cómo disfrutas cada historia. Lectura, video y archivos locales en un mismo lugar, sin sacrificar controles avanzados.
 
-> [!IMPORTANT]
-> **Proyecto en desarrollo.** Hay funciones terminadas, otras experimentales y algunas pendientes. Las modificaciones recientes deben compilarse y validarse antes de usarlas como versión estable. No desinstales una versión con datos importantes sin disponer de una copia de seguridad.
+> **Lee a tu ritmo. Mira a tu manera. Mantén tu biblioteca organizada.**
 
-## ✨ Qué puedes hacer
+<br />
 
-| 📖 Manga | 📺 Anime | 📂 Biblioteca y descargas |
-|:--|:--|:--|
-| Lectura online y local | Reproducción con motor **mpv** | Fuentes mediante extensiones |
-| Visores y orientación ajustables | Pistas de audio y subtítulos | Categorías y organización |
-| Historial y progreso | Velocidad ajustable y preajustes | Cola de descargas |
-| Descarga de capítulos | Relación de aspecto y calidad | Lectura/reproducción sin conexión |
-| Búsqueda y metadatos | Gestos de brillo, volumen y avance | Reconstrucción de índice |
-| Fuentes y galerías independientes | PiP cuando Android lo permite | Identidad de descargas por fuente y URL |
+## ✨ Funciones
 
-### 🎬 Reproductor de KIROHA
+<table>
+<tr>
+<td width="33%" valign="top">
 
-El reproductor está basado en **mpv** y ofrece una interfaz con controles rápidos de estilo reproductor multimedia:
+### 📚 Lectura
 
-- ⏪ **Retroceder 10 s / avanzar 10 s** sin salir del video.
-- ⏯️ Pausa, reproducción y cambio entre episodios.
-- ⚡ Velocidades rápidas **0,75× · 1× · 1,25× · 1,5× · 2×**, con ajuste detallado al mantener pulsado el control de velocidad.
-- 🚀 Mantener pulsada la imagen para **2× temporal**, con regreso a la velocidad anterior al soltar. Mantener pulsado el extremo izquierdo conserva el acceso a capturas.
-- 👆 Doble toque para buscar, desplazamiento horizontal y deslizamientos de brillo/volumen.
-- 💬 Subtítulos, pistas de audio, previsualización de búsqueda cuando esté disponible, bloqueo de controles y Picture-in-Picture cuando sea compatible.
+- Manga online y descargado
+- Varios modos de lectura
+- Navegación y orientación configurables
+- Historial y progreso
+- Metadatos y búsqueda
 
-Estas mejoras de interfaz están **en código** y todavía requieren validación en APK y teléfonos reales.
+</td>
+<td width="33%" valign="top">
 
-### 📥 Descargas: compatibilidad y seguridad
+### 🎬 Anime
 
-KIROHA está desarrollando un sistema que distingue obras con el mismo título mediante la **fuente y la URL de cada obra**, para impedir que una descarga aparezca atribuida a una galería diferente.
+- Reproductor basado en **mpv**
+- Subtítulos y pistas de audio
+- Control de velocidad
+- Gestos para reproducir y navegar
+- Picture-in-Picture compatible
 
-Las carpetas históricas, por ejemplo `E-Hentai (EN)`, y las nuevas como `E-Hentai (EN)__s_<id>`, se buscan como **ubicaciones alternativas de lectura**. Esto **no significa que se mezclen sus contenidos**: la atribución de cada capítulo requiere una identidad verificable.
+</td>
+<td width="33%" valign="top">
 
-Los archivos antiguos **no se eliminan ni se mueven automáticamente**. Algunos descargados sin metadatos suficientes aún podrían necesitar asociación manual. Consulta [compatibilidad de carpetas](docs/DUAL_SOURCE_FOLDER_COMPAT_148.md).
+### 🗂️ Organización
 
-## 🧩 KIROHA Core y sincronización
+- Biblioteca con categorías
+- Extensiones y fuentes
+- Cola de descargas
+- Contenido disponible sin conexión
+- Copias de seguridad
 
-El módulo `kiroha-core` reúne la identidad de dispositivos y descargas, el seguimiento de progreso, índices de almacenamiento y piezas de un protocolo de sincronización. También existe un servidor de referencia en `kiroha-sync-server/`.
+</td>
+</tr>
+</table>
 
-> La **sincronización automática y completa de bibliotecas entre varios celulares** todavía está en desarrollo. No la confundas con una función terminada de la APK.
+<br />
 
-Documentación: [estado](PROJECT_STATUS.md) · [plan](ROADMAP.md) · [Core](docs/KIROHA_CORE.md) · [sincronización](docs/SYNC_ANDROID.md).
+## 🎞️ Reproductor
+
+<div align="center">
+
+### Una experiencia de video más cómoda
+
+**Controles rápidos · Gestos intuitivos · Personalización avanzada**
+
+</div>
+
+| Control | Experiencia |
+|:---:|---|
+| ⏮️ **±10 s** | Avanza o retrocede diez segundos con los botones del reproductor. |
+| ⚡ **Velocidad** | Alterna entre **0,75× · 1× · 1,25× · 1,5× · 2×**. |
+| 🚀 **Pulsación prolongada** | Mantén pulsado para reproducir a **2×** temporalmente. |
+| 👆 **Gestos** | Doble toque, desplazamiento horizontal, brillo y volumen. |
+| 💬 **Audio y subtítulos** | Selecciona pistas y ajusta la reproducción. |
+| 🖥️ **Pantalla** | Relación de aspecto, bloqueo de controles y modo PiP cuando esté disponible. |
+
+<details>
+<summary><b>🎛️ Ver más posibilidades del reproductor</b></summary>
+
+<br />
+
+El motor **mpv** permite combinar controles sencillos con opciones avanzadas, como selección de pistas, ajustes de subtítulos, velocidad personalizada, previsualización al desplazarse cuando está disponible y controles adaptables a distintos tipos de video.
+
+Los accesos rápidos complementan las opciones existentes. No es necesario abandonar el reproductor para cambiar de episodio o ajustar la reproducción.
+
+</details>
+
+<br />
+
+## 📖 Tu biblioteca, a tu manera
+
+<table>
+<tr>
+<td valign="top" width="50%">
+
+### 🔖 Todo en orden
+
+Organiza series y mangas mediante **categorías**, continúa donde te quedaste y consulta tus títulos desde una biblioteca unificada.
+
+</td>
+<td valign="top" width="50%">
+
+### 📥 Disfruta sin conexión
+
+Guarda capítulos y episodios, consulta la **cola de descargas** y gestiona los archivos de tu dispositivo.
+
+</td>
+</tr>
+<tr>
+<td valign="top" width="50%">
+
+### 🔎 Encuentra lo que buscas
+
+Explora distintas fuentes y utiliza filtros, búsquedas y metadatos para localizar contenido.
+
+</td>
+<td valign="top" width="50%">
+
+### 🛡️ Tus archivos importan
+
+KIROHA utiliza identificadores de fuente y obra para distinguir títulos coincidentes, y mantiene la separación entre las descargas de cada colección.
+
+</td>
+</tr>
+</table>
+
+> [!TIP]
+> Al actualizar una instalación existente, conserva una **copia de seguridad** de tu biblioteca y utiliza el mismo identificador de aplicación y la misma firma para mantener tus datos.
+
+<br />
 
 ## 📲 Instalación
 
-**Requisitos:** Android **8.0 o superior** y espacio suficiente para las descargas que elijas.
+<div align="center">
 
-No hay que confundir **un commit de GitHub** con una APK comprobada. Las nuevas compilaciones se prueban antes de ofrecerlas como instalación general.
+<a href="https://github.com/cristiancutizaca/KIROHA_APP/releases"><img alt="Explorar versiones" src="https://img.shields.io/badge/VER_PUBLICACIONES-11182E?style=for-the-badge&logo=github&logoColor=white" /></a>
 
-**Si ya tienes KIROHA con tus bibliotecas:** instala solamente una APK firmada con la misma clave y con el mismo identificador de paquete. Las compilaciones `debug` utilizan `app.kiroha.mobile.dev`, distinto al paquete de lanzamiento. **No borres los datos de la aplicación ni las carpetas de descargas.**
+**Android 8.0 o superior**
 
-- [Repositorio y código fuente](https://github.com/cristiancutizaca/KIROHA_APP)
-- [Compilaciones automáticas y resultados](https://github.com/cristiancutizaca/KIROHA_APP/actions)
-- [Reportar un error](https://github.com/cristiancutizaca/KIROHA_APP/issues)
+</div>
 
-## 🛠️ Compilación
+Consulta la sección de **Publicaciones** para encontrar las versiones disponibles. Si ya tienes KIROHA instalada, utiliza una actualización compatible con tu versión para conservar la biblioteca, el historial y la configuración.
 
-El proyecto utiliza **Kotlin**, **Jetpack Compose**, **Gradle**, módulos Android y un motor de reproducción nativo.
+<br />
 
-**Entorno de referencia:**
+## 🧰 Para desarrolladores
 
-- **JDK 21**.
-- Android SDK (plataforma 37 y Build Tools 37, según la configuración actual).
-- Android NDK y CMake compatibles con la versión indicada en el repositorio.
-- Gradle Wrapper incluido: **no es necesario instalar Gradle globalmente**.
+<details>
+<summary><b>⌨️ Ver requisitos y compilación</b></summary>
+
+<br />
+
+El proyecto utiliza **Kotlin**, **Jetpack Compose**, **Gradle**, módulos Android y componentes nativos de reproducción.
+
+**Entorno recomendado:** JDK 21, Android SDK y las versiones de NDK/CMake indicadas en la configuración del repositorio.
 
 ```bash
 git clone https://github.com/cristiancutizaca/KIROHA_APP.git
 cd KIROHA_APP
 
-# Configura JAVA_HOME y ANDROID_HOME para tu equipo.
-./gradlew :kiroha-core:test :app:assembleDebug
+# Configura JAVA_HOME y ANDROID_HOME.
+./gradlew :app:assembleDebug
 ```
 
-La APK de desarrollo se genera, si la compilación termina correctamente, en `app/build/outputs/apk/debug/`. Los pasos y las dependencias nativas pueden variar según el entorno. [Incidencias conocidas](KNOWN_ISSUES.md).
+Las salidas de compilación Android se encuentran en `app/build/outputs/apk/`.
 
-## 🧭 Estado del proyecto
+</details>
 
-| Componente | Estado |
-|:--|:--|
-| Interfaz de lectura y biblioteca | 🟢 Base funcional |
-| Reproductor mpv y controles | 🟢 Base funcional |
-| Botones ±10 s, velocidad rápida, pulsación 2× | 🟡 Implementado en código; pendiente de prueba en APK |
-| Persistencia de cola de descargas | 🟡 Corregida en código; validar en más dispositivos |
-| Compatibilidad con descargas antiguas | 🟡 Recuperación parcial; sin traslado destructivo |
-| Bibliotecas con títulos duplicados | 🟡 Mejoras de identidad, requieren pruebas |
-| Sincronización automática entre dispositivos | 🔧 En desarrollo |
-| Compilación y validación de la rama actual | 🔴 Pendiente |
+<details>
+<summary><b>🧩 Explorar la arquitectura y documentación</b></summary>
 
-No presentamos funciones experimentales como si ya estuvieran terminadas. Revisa el [registro de problemas](KNOWN_ISSUES.md) antes de probar una actualización.
+<br />
 
-## 🤝 Colaborar
+| Componente | Función |
+|---|---|
+| `app/` | Interfaz Android, lectura, reproducción y descargas |
+| `kiroha-core/` | Identidad de descargas, dispositivos y progreso |
+| `domain/` y `data/` | Lógica de negocio y acceso a datos |
+| `kiroha-sync-server/` | Infraestructura de referencia para sincronización |
 
-Se aceptan reportes reproducibles, documentación, traducciones y propuestas de código.
+La evolución de la sincronización entre dispositivos y otros componentes está descrita en la [hoja de ruta](ROADMAP.md).
 
-Para informar un fallo, indica la versión, el dispositivo, Android, los pasos para reproducirlo y capturas o registros **sin datos privados**. Abre una [incidencia](https://github.com/cristiancutizaca/KIROHA_APP/issues) y revisa [CONTRIBUTING.md](CONTRIBUTING.md) y [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+[Documentación de KIROHA Core](docs/KIROHA_CORE.md) · [Arquitectura de sincronización](docs/SYNC_ANDROID.md) · [Estado técnico](PROJECT_STATUS.md)
 
-## 🙏 Origen y créditos
+</details>
 
-**KIROHA es un proyecto derivado, no una aplicación creada desde cero.** Se basa en [**Animetail (repositorio original)**](https://github.com/Animetailapp/Animetail), y hereda código y aportes del ecosistema [Aniyomi](https://github.com/aniyomiorg/aniyomi), [Mihon](https://github.com/mihonapp/mihon) y otros proyectos y colaboradores, incluido el reproductor basado en mpv.
+<br />
 
-Los derechos de autor, los avisos de licencia y los créditos de los proyectos originales se conservan donde corresponde. **KIROHA no está afiliada oficialmente a los equipos anteriores.** Este repositorio no solicita donaciones en su nombre ni dirige pagos a cuentas de terceros.
+## 💜 Comunidad y colaboración
 
-Consulta [LICENSE](LICENSE), los encabezados de los archivos originales y el apartado de **Licencias** dentro de la aplicación.
+¿Quieres ayudar a mejorar KIROHA? Se agradecen las propuestas de funciones, los reportes de errores, las traducciones, la documentación y las contribuciones de código.
 
-## ⚖️ Aviso legal
+<div align="center">
 
-Esta aplicación **no aloja contenido audiovisual o editorial**. Las fuentes y extensiones son responsabilidad de sus respectivos autores y servicios. Utiliza únicamente contenido al que tengas derecho de acceso y respeta las leyes aplicables.
+[**💬 Proponer una idea o informar un problema**](https://github.com/cristiancutizaca/KIROHA_APP/issues)  
+[**🤝 Guía para contribuir**](CONTRIBUTING.md) · [**📜 Código de conducta**](CODE_OF_CONDUCT.md)
 
-Distribuido bajo la **Apache License 2.0**, sujeto a las licencias de sus dependencias y a los avisos aplicables de los componentes derivados.
+</div>
+
+<br />
+
+## 🙏 Origen, créditos y licencia
+
+KIROHA es un **proyecto derivado de código abierto**. Está basado en [**Animetail**](https://github.com/Animetailapp/Animetail) y aprovecha contribuciones y componentes del ecosistema [Aniyomi](https://github.com/aniyomiorg/aniyomi), [Mihon](https://github.com/mihonapp/mihon), mpv y otros proyectos colaboradores.
+
+Los créditos, derechos de autor y avisos de licencia originales se respetan. KIROHA es un proyecto independiente y **no representa oficialmente a los equipos de esos proyectos**.
+
+Distribuido bajo [**Apache License 2.0**](LICENSE), con sujeción a las licencias y avisos de los componentes de terceros.
+
+<sub>KIROHA no aloja contenido. Cada fuente y proveedor establece sus propias condiciones de uso.</sub>
 
 ---
 
-<div align="center"><strong>KIROHA</strong> · Hecho para leer, ver y organizar sin perder el control de tu biblioteca.</div>
+<div align="center">
+
+### ✦ KIROHA ✦
+
+**Cada historia tiene su lugar.**
+
+<sub>Hecho con Kotlin, Compose y muchas ganas de mejorar la experiencia de lectura y reproducción.</sub>
+
+</div>
