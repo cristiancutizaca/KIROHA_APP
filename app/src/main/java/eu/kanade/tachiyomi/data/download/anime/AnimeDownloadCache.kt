@@ -357,6 +357,7 @@ class AnimeDownloadCache(
             return
         }
 
+        var indexedSuccessfully = false
         renewalJob = scope.launchIO {
             if (lastRenew == 0L) {
                 _isInitializing.emit(true)
@@ -387,9 +388,12 @@ class AnimeDownloadCache(
                         }
                         .toMap()
 
-                    updatedRootDir.sourceDirs.values.map { sourceDir ->
-                        async {
-                            sourceDir.animeDirs = sourceDir.dir?.listFiles().orEmpty()
+                    // Enumerating SAF folders is expensive on slower phones
+                    // and SD cards. Index at most two sources simultaneously.
+                    updatedRootDir.sourceDirs.values.chunked(2).forEach { batch ->
+                        batch.map { sourceDir ->
+                            async {
+                                sourceDir.animeDirs = sourceDir.dir?.listFiles().orEmpty()
                                 .filter { it.isDirectory && !it.name.isNullOrBlank() }
                                 .associate { it.name!! to AnimeDirectory(it) }
                             sourceDir.animeDirs.values.forEach { animeDir ->
@@ -414,13 +418,14 @@ class AnimeDownloadCache(
                                     }
                                     .toMutableSet()
 
-                                animeDir.episodeDirs = episodeDirs
+                                    animeDir.episodeDirs = episodeDirs
+                                }
                             }
-                        }
+                        }.awaitAll()
                     }
-                        .awaitAll()
 
                     rootDownloadsDir = updatedRootDir
+                    indexedSuccessfully = true
                 }
             } finally {
                 _isInitializing.value = false
@@ -430,7 +435,8 @@ class AnimeDownloadCache(
                 if (exception != null && exception !is CancellationException) {
                     logcat(LogPriority.ERROR, exception) { "Failed to create download cache" }
                 }
-                lastRenew = System.currentTimeMillis()
+                // Failed or cancelled scans should not prevent retries for an hour.
+                lastRenew = if (exception == null && indexedSuccessfully) System.currentTimeMillis() else 0L
                 notifyChanges()
             }
         }
