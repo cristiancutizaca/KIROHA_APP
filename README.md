@@ -49,37 +49,34 @@ Elige tus fuentes, organiza tus colecciones y personaliza cómo disfrutas cada h
 <table>
 <tr>
 <td width="33%" valign="top">
-
-### 📚 Lectura
-
-- Manga online y descargado
-- Varios modos de lectura
-- Navegación y orientación configurables
-- Historial y progreso
-- Metadatos y búsqueda
-
+<h3>📚 Lectura</h3>
+<ul>
+<li>Manga online y descargado</li>
+<li>Varios modos de lectura</li>
+<li>Navegación y orientación configurables</li>
+<li>Historial y progreso</li>
+<li>Metadatos y búsqueda</li>
+</ul>
 </td>
 <td width="33%" valign="top">
-
-### 🎬 Anime
-
-- Reproductor basado en **mpv**
-- Subtítulos y pistas de audio
-- Control de velocidad
-- Gestos para reproducir y navegar
-- Picture-in-Picture compatible
-
+<h3>🎬 Anime</h3>
+<ul>
+<li>Reproductor basado en <strong>mpv</strong></li>
+<li>Subtítulos y pistas de audio</li>
+<li>Control de velocidad</li>
+<li>Gestos para reproducir y navegar</li>
+<li>Picture-in-Picture compatible</li>
+</ul>
 </td>
 <td width="33%" valign="top">
-
-### 🗂️ Organización
-
-- Biblioteca con categorías
-- Extensiones y fuentes
-- Cola de descargas
-- Contenido disponible sin conexión
-- Copias de seguridad
-
+<h3>🗂️ Organización</h3>
+<ul>
+<li>Biblioteca con categorías</li>
+<li>Extensiones y fuentes</li>
+<li>Cola de descargas</li>
+<li>Contenido disponible sin conexión</li>
+<li>Copias de seguridad</li>
+</ul>
 </td>
 </tr>
 </table>
@@ -123,34 +120,22 @@ Los accesos rápidos complementan las opciones existentes. No es necesario aband
 <table>
 <tr>
 <td valign="top" width="50%">
-
-### 🔖 Todo en orden
-
-Organiza series y mangas mediante **categorías**, continúa donde te quedaste y consulta tus títulos desde una biblioteca unificada.
-
+<h3>🔖 Todo en orden</h3>
+<p>Organiza series y mangas mediante <strong>categorías</strong>, continúa donde te quedaste y consulta tus títulos desde una biblioteca unificada.</p>
 </td>
 <td valign="top" width="50%">
-
-### 📥 Disfruta sin conexión
-
-Guarda capítulos y episodios, consulta la **cola de descargas** y gestiona los archivos de tu dispositivo.
-
+<h3>📥 Disfruta sin conexión</h3>
+<p>Guarda capítulos y episodios, consulta la <strong>cola de descargas</strong> y gestiona los archivos de tu dispositivo.</p>
 </td>
 </tr>
 <tr>
 <td valign="top" width="50%">
-
-### 🔎 Encuentra lo que buscas
-
-Explora distintas fuentes y utiliza filtros, búsquedas y metadatos para localizar contenido.
-
+<h3>🔎 Encuentra lo que buscas</h3>
+<p>Explora distintas fuentes y utiliza filtros, búsquedas y metadatos para localizar contenido.</p>
 </td>
 <td valign="top" width="50%">
-
-### 🛡️ Tus archivos importan
-
-KIROHA utiliza identificadores de fuente y obra para distinguir títulos coincidentes, y mantiene la separación entre las descargas de cada colección.
-
+<h3>🛡️ Tus archivos importan</h3>
+<p>KIROHA utiliza identificadores de fuente y obra para distinguir títulos coincidentes, y mantiene la separación entre las descargas de cada colección.</p>
 </td>
 </tr>
 </table>
