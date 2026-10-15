@@ -108,7 +108,7 @@ La APK de desarrollo se genera, si la compilación termina correctamente, en `ap
 | Reproductor mpv y controles | 🟢 Base funcional |
 | Botones ±10 s, velocidad rápida, pulsación 2× | 🟡 Implementado en código; pendiente de prueba en APK |
 | Persistencia de cola de descargas | 🟡 Corregida en código; validar en más dispositivos |
-| Descargas antiguas de Aniyomi/Animetail | 🟡 Recuperación parcial; no migración destructiva |
+| Compatibilidad con descargas antiguas | 🟡 Recuperación parcial; sin traslado destructivo |
 | Bibliotecas con títulos duplicados | 🟡 Mejoras de identidad, requieren pruebas |
 | Sincronización automática entre dispositivos | 🔧 En desarrollo |
 | Compilación y validación de la rama actual | 🔴 Pendiente |
