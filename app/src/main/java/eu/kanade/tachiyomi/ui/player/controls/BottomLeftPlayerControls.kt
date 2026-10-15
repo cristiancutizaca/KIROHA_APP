@@ -66,9 +66,12 @@ fun BottomLeftPlayerControls(
         ControlsButton(
             text = stringResource(AYMR.strings.player_speed, playbackSpeed),
             onClick = {
-                val newSpeed = if (playbackSpeed >= 2) 0.25f else playbackSpeed + 0.25f
-                onPlaybackSpeedChange(newSpeed)
-                playerPreferences.playerSpeed().set(newSpeed)
+                // Familiar, readable one-tap speeds, like modern local video
+                // players. Long-press still opens the full precision control.
+                val presets = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+                val next = presets.firstOrNull { it > playbackSpeed + 0.01f } ?: presets.first()
+                onPlaybackSpeedChange(next)
+                playerPreferences.playerSpeed().set(next)
             },
             onLongClick = { onOpenSheet(Sheets.PlaybackSpeed) },
         )
