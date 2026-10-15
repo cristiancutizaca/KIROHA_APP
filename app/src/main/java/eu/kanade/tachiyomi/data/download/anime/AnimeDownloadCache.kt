@@ -452,7 +452,11 @@ class AnimeDownloadCache(
         updateDiskCacheJob = scope.launchIO {
             delay(1000)
             ensureActive()
-            val bytes = ProtoBuf.encodeToByteArray(rootDownloadsDir)
+            // Snapshot under the same mutex used by index mutations, so an
+            // in-flight download cannot produce a partially serialized tree.
+            val bytes = rootDownloadsDirMutex.withLock {
+                ProtoBuf.encodeToByteArray(rootDownloadsDir)
+            }
             ensureActive()
             try {
                 // AtomicFile keeps the previous working index intact if
