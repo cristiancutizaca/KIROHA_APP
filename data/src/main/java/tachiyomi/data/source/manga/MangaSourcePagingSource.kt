@@ -54,7 +54,7 @@ abstract class SourcePagingSource(
                 val response = withIOContext { requestNextPage(page.toInt()) }
                 val networkMs = (System.nanoTime() - networkStart) / 1_000_000
                 val dedupStart = System.nanoTime()
-                val filtered = pageDeduplicator.accept(response.mangas, response.hasNextPage)
+                val filtered = pageDeduplicator.acceptPage(page, response.mangas, response.hasNextPage)
                 val dedupMs = (System.nanoTime() - dedupStart) / 1_000_000
 
                 Log.d(
@@ -98,9 +98,10 @@ abstract class SourcePagingSource(
     }
 
     override fun getRefreshKey(state: PagingState<Long, SManga>): Long? {
-        return state.anchorPosition?.let { anchorPosition ->
-            val anchorPage = state.closestPageToPosition(anchorPosition)
-            anchorPage?.prevKey ?: anchorPage?.nextKey
-        }
+        // This source uses forward-only, page-numbered searches with no
+        // valid prevKey. Returning nextKey for an anchor starts a refresh at
+        // the *following* page and makes later results appear out of order.
+        // Reload from page 1 for every refresh, preserving source ordering.
+        return null
     }
 }
