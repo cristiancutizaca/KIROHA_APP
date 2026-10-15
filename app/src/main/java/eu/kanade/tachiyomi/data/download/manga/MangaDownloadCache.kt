@@ -435,6 +435,7 @@ class MangaDownloadCache(
             return
         }
 
+        var indexedSuccessfully = false
         renewalJob = scope.launchIO {
             if (lastRenew == 0L) {
                 _isInitializing.emit(true)
@@ -463,9 +464,12 @@ class MangaDownloadCache(
                         }
                         .toMap()
 
-                    updatedRootDir.sourceDirs.values.map { sourceDir ->
-                        async {
-                            sourceDir.mangaDirs = sourceDir.dir?.listFiles().orEmpty()
+                    // Scanning many source folders in parallel creates excessive
+                    // SAF I/O and heat. Limit indexing to two sources at a time.
+                    updatedRootDir.sourceDirs.values.chunked(2).forEach { batch ->
+                        batch.map { sourceDir ->
+                            async {
+                                sourceDir.mangaDirs = sourceDir.dir?.listFiles().orEmpty()
                                 .filter { it.isDirectory && !it.name.isNullOrBlank() }
                                 .associate { it.name!! to MangaDirectory(it) }
                             sourceDir.mangaDirs.values.forEach { mangaDir ->
@@ -487,13 +491,14 @@ class MangaDownloadCache(
                                     }
                                     .toMutableSet()
 
-                                mangaDir.chapterDirs = chapterDirs
+                                    mangaDir.chapterDirs = chapterDirs
+                                }
                             }
-                        }
+                        }.awaitAll()
                     }
-                        .awaitAll()
 
                     rootDownloadsDir = updatedRootDir
+                    indexedSuccessfully = true
                 }
             } finally {
                 _isInitializing.value = false
@@ -503,7 +508,9 @@ class MangaDownloadCache(
                 if (exception != null && exception !is CancellationException) {
                     logcat(LogPriority.ERROR, exception) { "DownloadCache: failed to create cache" }
                 }
-                lastRenew = System.currentTimeMillis()
+                // An unavailable extension registry or failed SAF scan must
+                // not freeze a stale/empty index for an entire hour.
+                lastRenew = if (exception == null && indexedSuccessfully) System.currentTimeMillis() else 0L
                 notifyChanges()
             }
         }
