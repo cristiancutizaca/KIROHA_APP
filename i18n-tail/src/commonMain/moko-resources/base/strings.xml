@@ -44,9 +44,9 @@
     <string name="special_services">Special Services</string>
     <string name="pref_category_connections">Connections</string>
     <string name="pref_connections_summary">Discord, more to come..</string>
-    <string name="connections_info">Special Services that are unique to Animetail and enhance the way you use the app</string>
+    <string name="connections_info">Optional integrations available in KIROHA. Review the privacy and security implications before connecting accounts.</string>
     <string name="connections_discord">Discord</string>
-    <string name="connections_discord_info">This Discord Service works through token logging. Use at your own risk. Your token is stored locally and Animetail does not share it anywhere else</string>
+    <string name="connections_discord_info">This Discord integration uses an account token, which is sensitive. Review the code and use it at your own risk.</string>
     <string name="pref_discord_rpc">Discord Rich Presence</string>
     <string name="show_chapters_titles_title">Show Episodes/Chapters Titles</string>
     <string name="show_chapters_titles_subtitle">Show the title of the episode/chapter you are reading</string>
