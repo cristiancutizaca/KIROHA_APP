@@ -133,35 +133,28 @@ class MoreViewModel(
     val downloadQueueState: StateFlow<DownloadQueueState> = _downloadQueueState.asStateFlow()
 
     init {
-        // Handle running/paused status change and queue progress updating
+        // Collect all four sources together. The previous nested combine
+        // cancelled and re-subscribed to anime flows whenever the manga
+        // queue changed, leading to extra work and transient stale states.
         viewModelScope.launchIO {
             combine(
                 downloadManager.isDownloaderRunning,
                 downloadManager.queueState,
-            ) { isRunningManga, mangaDownloadQueue -> Pair(isRunningManga, mangaDownloadQueue.size) }
-                .collectLatest { (isDownloadingManga, mangaDownloadQueueSize) ->
-                    combine(
-                        animeDownloadManager.isDownloaderRunning,
-                        animeDownloadManager.queueState,
-                    ) { isRunningAnime, animeDownloadQueue ->
-                        Pair(
-                            isRunningAnime,
-                            animeDownloadQueue.size,
-                        )
-                    }
-                        .collectLatest { (isDownloadingAnime, animeDownloadQueueSize) ->
-                            val isDownloading = isDownloadingAnime || isDownloadingManga
-                            val downloadQueueSize = mangaDownloadQueueSize + animeDownloadQueueSize
-                            val pendingDownloadExists = downloadQueueSize != 0
-                            _downloadQueueState.value = when {
-                                !pendingDownloadExists -> DownloadQueueState.Stopped
-                                !isDownloading -> DownloadQueueState.Paused(downloadQueueSize)
-                                else -> DownloadQueueState.Downloading(downloadQueueSize)
-                            }
-                        }
+                animeDownloadManager.isDownloaderRunning,
+                animeDownloadManager.queueState,
+            ) { mangaRunning, mangaQueue, animeRunning, animeQueue ->
+                val pending = mangaQueue.size + animeQueue.size
+                when {
+                    pending == 0 -> DownloadQueueState.Stopped
+                    mangaRunning || animeRunning -> DownloadQueueState.Downloading(pending)
+                    else -> DownloadQueueState.Paused(pending)
                 }
+            }.collectLatest { state ->
+                _downloadQueueState.value = state
+            }
         }
     }
+
 }
 
 sealed interface DownloadQueueState {
