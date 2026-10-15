@@ -7,7 +7,6 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.data.download.anime.model.AnimeDownload
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import tachiyomi.domain.entries.anime.interactor.GetAnime
@@ -106,7 +105,7 @@ class AnimeDownloadStore(
     /**
      * Returns the list of downloads to restore. It should be called in a background thread.
      */
-    fun restore(): List<AnimeDownload> {
+    suspend fun restore(): List<AnimeDownload> {
         // Keep entries on disk throughout restore. The previous clear() introduced
         // a window where a killed process lost every pending download.
         val saved = preferences.all.values
@@ -126,10 +125,10 @@ class AnimeDownloadStore(
         val cachedAnime = mutableMapOf<Long, Anime?>()
         for (obj in (saved + legacy).distinctBy { it.episodeId }.sortedBy { it.order }) {
             val anime = cachedAnime.getOrPut(obj.animeId) {
-                runBlocking { getAnime.await(obj.animeId) }
+                getAnime.await(obj.animeId)
             } ?: continue
             val source = sourceManager.get(anime.source) as? AnimeHttpSource ?: continue
-            val episode = runBlocking { getEpisode.await(obj.episodeId) } ?: continue
+            val episode = getEpisode.await(obj.episodeId) ?: continue
             if (episode.animeId != anime.id) continue
             restored.add(AnimeDownload(source, anime, episode))
             if (obj in legacy) validLegacy.add(obj)
