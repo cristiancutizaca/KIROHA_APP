@@ -119,7 +119,7 @@ fun GestureHandler(
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeGestures)
             .pointerInput(Unit) {
-                val originalSpeed = viewModel.playbackSpeed.value
+                var originalSpeed = viewModel.playbackSpeed.value
                 detectTapGestures(
                     onTap = {
                         if (controlsShown) viewModel.hideControls() else viewModel.showControls()
@@ -139,6 +139,9 @@ fun GestureHandler(
                         }
                     },
                     onPress = {
+                        // Always save the CURRENT speed: this pointer handler lives
+                        // longer than a speed-selection sheet recomposition.
+                        originalSpeed = viewModel.playbackSpeed.value
                         if (panelShown != Panels.None && !allowGesturesInPanels) {
                             viewModel.panelShown.update { Panels.None }
                         }
@@ -169,11 +172,18 @@ fun GestureHandler(
                     },
                     onLongPress = {
                         if (areControlsLocked) return@detectTapGestures
-                        if (!isLongPressing) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            isLongPressing = true
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (it.x < size.width * 0.2f) {
+                            // Keep screenshot capture reachable with a left-edge
+                            // hold instead of taking it away from existing users.
                             viewModel.pause()
                             viewModel.sheetShown.update { Sheets.Screenshot }
+                        } else if (!isLongPressing && !viewModel.paused.value) {
+                            // Familiar video-player hold-to-speed-up gesture.
+                            // Restores the precise previous speed on release.
+                            isLongPressing = true
+                            viewModel.mpv.setPropertyDouble("speed", 2.0)
+                            viewModel.playerUpdate.update { PlayerUpdates.ShowText("2×") }
                         }
                     },
                 )
