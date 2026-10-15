@@ -35,13 +35,8 @@ class AppUpdateChecker(
     }
 }
 
-val GITHUB_REPO: String by lazy {
-    if (isNightlyBuildType) {
-        "Animetailapp/animetail-preview"
-    } else {
-        "Animetailapp/Animetail"
-    }
-}
+// KIROHA must never offer to install an unrelated upstream APK over user data.
+val GITHUB_REPO = "cristiancutizaca/KIROHA_APP"
 
 val RELEASE_TAG: String by lazy {
     if (isNightlyBuildType) {
