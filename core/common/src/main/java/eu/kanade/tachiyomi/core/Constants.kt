@@ -3,9 +3,6 @@ package eu.kanade.tachiyomi.core.common
 object Constants {
     const val URL_HELP = "https://github.com/cristiancutizaca/KIROHA_APP/issues"
     const val URL_HELP_UPCOMING = "https://aniyomi.org/docs/faq/updates/upcoming"
-    const val URL_DONATE = "https://www.patreon.com/abydev/membership"
-    const val URL_DONATE_PATREON = "https://patreon.com/abydev/membership"
-    const val URL_DONATE_OPENCOLLECTIVE = "https://opencollective.com/animetail/contribute"
     const val URL_DISCORD = "https://discord.gg/wPRFW6ccDE"
 
     const val MANGA_EXTRA = "manga"
