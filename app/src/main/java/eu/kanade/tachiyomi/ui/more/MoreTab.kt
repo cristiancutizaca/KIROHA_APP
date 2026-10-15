@@ -42,7 +42,7 @@ import eu.kanade.tachiyomi.ui.storage.StorageTab
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import mihon.feature.support.SupportUsScreen
 import tachiyomi.core.common.util.lang.launchIO
@@ -149,7 +149,7 @@ class MoreViewModel(
                     mangaRunning || animeRunning -> DownloadQueueState.Downloading(pending)
                     else -> DownloadQueueState.Paused(pending)
                 }
-            }.collectLatest { state ->
+            }.collect { state ->
                 _downloadQueueState.value = state
             }
         }
