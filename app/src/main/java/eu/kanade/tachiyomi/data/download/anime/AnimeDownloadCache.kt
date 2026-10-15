@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.download.anime
 
 import android.app.Application
 import android.content.Context
+import android.util.AtomicFile
 import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import dev.zacsweers.metro.AppScope
@@ -466,7 +467,17 @@ class AnimeDownloadCache(
             val bytes = ProtoBuf.encodeToByteArray(rootDownloadsDir)
             ensureActive()
             try {
-                diskCacheFile.writeBytes(bytes)
+                // AtomicFile keeps the previous working index intact if
+                // Android kills the app during a cache write.
+                val file = AtomicFile(diskCacheFile)
+                val stream = file.startWrite()
+                try {
+                    stream.write(bytes)
+                    file.finishWrite(stream)
+                } catch (failure: Throwable) {
+                    file.failWrite(stream)
+                    throw failure
+                }
             } catch (e: Throwable) {
                 logcat(
                     priority = LogPriority.ERROR,
