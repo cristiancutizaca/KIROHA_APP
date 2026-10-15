@@ -125,6 +125,45 @@ class KirohaCoreTest {
     }
 
     @Test
+    fun `pagination retry does not erase a loaded page as duplicate`() {
+        val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
+        val first = deduplicator.acceptPage(1L, listOf("2026-A", "2025-B"), true)
+        val second = deduplicator.acceptPage(2L, listOf("2025-B", "2024-C"), true)
+        val retried = deduplicator.acceptPage(2L, listOf("2025-B", "2024-C"), true)
+
+        assertEquals(listOf("2026-A", "2025-B"), first.items)
+        assertEquals(listOf("2024-C"), second.items)
+        assertEquals(listOf("2024-C"), retried.items)
+    }
+
+    @Test
+    fun `pagination retains extension order when scrolling through years`() {
+        val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
+        val first = deduplicator.acceptPage(1L, listOf("2026-A", "2025-A"), true)
+        val second = deduplicator.acceptPage(2L, listOf("2024-A", "2023-A"), true)
+        val third = deduplicator.acceptPage(3L, listOf("2023-A", "2022-A"), false)
+
+        assertEquals(
+            listOf("2026-A", "2025-A", "2024-A", "2023-A", "2022-A"),
+            first.items + second.items + third.items,
+        )
+        assertFalse(third.hasNext)
+    }
+
+    @Test
+    fun `pagination new generation clears old seen URLs on page one`() {
+        val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
+        deduplicator.acceptPage(1L, listOf("2026-A"), true)
+        deduplicator.acceptPage(2L, listOf("2025-A"), false)
+
+        val reloaded = deduplicator.acceptPage(1L, listOf("2026-A", "2026-B"), true)
+        val appended = deduplicator.acceptPage(2L, listOf("2026-B", "2024-A"), false)
+
+        assertEquals(listOf("2026-A", "2026-B"), reloaded.items)
+        assertEquals(listOf("2024-A"), appended.items)
+    }
+
+    @Test
     fun `storage unavailable copy stays globally downloaded`() {
         val record = DownloadRecord("x", "phone-b", "sd-1", DownloadAvailability.STORAGE_UNAVAILABLE, downloadedEver = true)
         assertTrue(DownloadStateResolver.isDownloadedGlobally(listOf(record), "x"))
