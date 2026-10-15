@@ -26,9 +26,9 @@ class PageDeduplicator<T>(private val canonicalKey: (T) -> String) {
 
         if (acceptedKeysByPage.isNotEmpty() && page <= acceptedKeysByPage.lastKey()) {
             val stale = acceptedKeysByPage.tailMap(page).keys.toList()
-            stale.forEach(acceptedKeysByPage::remove)
+            stale.forEach { acceptedKeysByPage.remove(it) }
             seen.clear()
-            acceptedKeysByPage.values.forEach(seen::addAll)
+            acceptedKeysByPage.values.forEach { seen.addAll(it) }
         }
 
         var removed = 0
