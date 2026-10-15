@@ -394,31 +394,20 @@ class AnimeDownloadCache(
                         batch.map { sourceDir ->
                             async {
                                 sourceDir.animeDirs = sourceDir.dir?.listFiles().orEmpty()
-                                .filter { it.isDirectory && !it.name.isNullOrBlank() }
-                                .associate { it.name!! to AnimeDirectory(it) }
-                            sourceDir.animeDirs.values.forEach { animeDir ->
-                                val episodeDirs = animeDir.dir?.listFiles().orEmpty()
-                                    .mapNotNull {
-                                        when {
-                                            // Ignore incomplete downloads
-                                            it.name?.endsWith(AnimeDownloader.TMP_DIR_SUFFIX) == true -> null
-
-                                            // Folder of videos
-                                            it.isDirectory -> it.name
-
-                                            // MP4 files
+                                    .filter { it.isDirectory && !it.name.isNullOrBlank() }
+                                    .associate { it.name!! to AnimeDirectory(it) }
+                                sourceDir.animeDirs.values.forEach { itemDir ->
+                                    itemDir.episodeDirs = itemDir.dir?.listFiles().orEmpty()
+                                        .mapNotNull {
+                                            when {
+                                                it.name?.endsWith(AnimeDownloader.TMP_DIR_SUFFIX) == true -> null
+                                                it.isDirectory -> it.name
                                             it.isFile && it.extension == "mp4" -> it.nameWithoutExtension
-
-                                            // MKV files
                                             it.isFile && it.extension == "mkv" -> it.nameWithoutExtension
-
-                                            // Anything else is irrelevant
-                                            else -> null
+                                                else -> null
+                                            }
                                         }
-                                    }
-                                    .toMutableSet()
-
-                                    animeDir.episodeDirs = episodeDirs
+                                        .toMutableSet()
                                 }
                             }
                         }.awaitAll()
