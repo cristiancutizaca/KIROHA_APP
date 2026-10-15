@@ -8,6 +8,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.source.model.SChapter
+import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.lang.Hash.md5
 import eu.kanade.tachiyomi.util.storage.DiskUtil
@@ -50,7 +51,7 @@ class MangaDownloadProvider(
     // A legacy source may contain hundreds of title folders. Index it once in
     // memory so checking each chapter does not enumerate the same directory
     // hundreds of times. This index never moves or rewrites user files.
-    private data class LegacySourceFolders(val rootUri: String, val folders: Map<String, UniFile>)
+    private data class LegacySourceFolders(val rootUri: String, val folders: Map<String, List<UniFile>>)
     private val legacyFolderIndex = ConcurrentHashMap<Long, LegacySourceFolders>()
 
     fun invalidateLegacyFolderIndex() {
@@ -145,73 +146,98 @@ class MangaDownloadProvider(
     ): UniFile? {
         if (mangaUrl.isNullOrBlank() || chapterUrl.isBlank()) return null
         val httpSource = source as? HttpSource ?: return null
-        val expectedUrl = runCatching {
-            httpSource.getChapterUrl(SChapter.create().apply {
-                url = chapterUrl
-                name = chapterName
-                scanlator = chapterScanlator
-            })
-        }.getOrNull()?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() } ?: return null
-
         val root = downloadsDir ?: return null
-        val legacySourceName = DiskUtil.buildValidFilename(
-            source.toString(),
-            DiskUtil.MAX_FILE_NAME_BYTES,
-            libraryPreferences.disallowNonAsciiFilenames.get(),
-        )
+
+        // E-Hentai (EN) and E-Hentai (EN)__s_<id> are READ aliases.
+        // Their labels only choose where to search. Each chapter MUST prove
+        // its URL identity before a gallery can claim those existing files.
         val oldTitle = DiskUtil.buildValidFilename(
             mangaTitle,
             DiskUtil.MAX_FILE_NAME_BYTES,
             libraryPreferences.disallowNonAsciiFilenames.get(),
         )
-        val rootUri = root.uri.toString() + "/" + legacySourceName
-        val stored = legacyFolderIndex[source.id]
-        val folders = if (stored?.rootUri == rootUri) {
-            stored.folders
-        } else {
-            // Scan the legacy source directory only once per storage/source.
-            // Unlike title-only matching, ownership is still verified below
-            // from the *individual chapter* ComicInfo URL.
-            val indexed = root.findFile(legacySourceName)
-                ?.takeIf { it.isDirectory }
-                ?.listFiles().orEmpty()
-                .asSequence()
-                .filter { it.isDirectory && !it.name.isNullOrBlank() }
-                .associateBy { it.name!! }
-            legacyFolderIndex[source.id] = LegacySourceFolders(rootUri, indexed)
-            indexed
-        }
-        val legacyMangaDir = folders[oldTitle] ?: return null
-
         val candidates = (getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl) +
             getLegacyChapterDirNames(chapterName, chapterScanlator, chapterUrl)
                 .flatMap { listOf(it, "$it.cbz") }).distinct()
-
         val chapterUrlHash = "_" + md5(chapterUrl).take(12)
-        return candidates.asSequence().mapNotNull(legacyMangaDir::findFile)
+
+        // Old ComicInfo may contain the gallery URL instead of the chapter URL.
+        val expectedUrls = buildSet {
+            add(chapterUrl.trim().trimEnd('/'))
+            add(mangaUrl.trim().trimEnd('/'))
+            runCatching {
+                httpSource.getChapterUrl(SChapter.create().apply {
+                    url = chapterUrl
+                    name = chapterName
+                    scanlator = chapterScanlator
+                })
+            }.getOrNull()?.trim()?.trimEnd('/')?.let(::add)
+            runCatching {
+                httpSource.getMangaUrl(SManga.create().apply {
+                    url = mangaUrl
+                    title = mangaTitle
+                })
+            }.getOrNull()?.trim()?.trimEnd('/')?.let(::add)
+        }.filter { it.isNotBlank() }.toSet()
+
+        return legacySourceFolders(root, source)[oldTitle].orEmpty().asSequence()
+            .flatMap { legacyMangaDir ->
+                candidates.asSequence().mapNotNull(legacyMangaDir::findFile)
+            }
             .firstOrNull { file ->
-                // Many earlier downloads include a hash derived from the exact
-                // chapter URL. This proves identity even if ComicInfo is absent.
-                // Never accept an old *unhashed* chapter name on title alone.
+                // Exact chapter hash OR matching metadata. No title-only claims.
                 val withoutExtension = file.name.orEmpty().removeSuffix(".cbz")
-                val hasChapterIdentity = withoutExtension.endsWith(chapterUrlHash) &&
+                val hashedChapter = withoutExtension.endsWith(chapterUrlHash) &&
                     if (file.isDirectory) {
-                        file.listFiles().orEmpty().any { it.isFile && it.length() > 0L }
+                        file.listFiles().orEmpty().any {
+                            it.isFile && it.length() > 0L &&
+                                it.name != "ComicInfo.xml" && it.name != ".nomedia" &&
+                                it.name?.endsWith(".tmp") != true
+                        }
                     } else {
                         file.isFile && file.length() > 512L
                     }
-                hasChapterIdentity || hasVerifiedLegacyComicInfo(file, expectedUrl)
+                hashedChapter || hasVerifiedLegacyComicInfo(file, expectedUrls)
             }
     }
 
+    private fun legacySourceFolders(root: UniFile, source: MangaSource): Map<String, List<UniFile>> {
+        val rootUri = root.uri.toString()
+        legacyFolderIndex[source.id]?.takeIf { it.rootUri == rootUri }?.let { return it.folders }
+
+        val expectedLabel = DiskUtil.buildValidFilename(
+            source.toString(),
+            DiskUtil.MAX_FILE_NAME_BYTES,
+            libraryPreferences.disallowNonAsciiFilenames.get(),
+        )
+        // The numeric __s_ suffix identifies the source-storage namespace,
+        // but the visible extension label remains the same.
+        val sourceDirs = root.listFiles().orEmpty()
+            .filter { it.isDirectory && !it.name.isNullOrBlank() }
+            .filter { dir ->
+                dir.name.orEmpty().replace(SOURCE_ID_SUFFIX, "").equals(expectedLabel, ignoreCase = true)
+            }
+            .sortedWith(compareBy<UniFile> { it.name != expectedLabel }.thenBy { it.name.orEmpty() })
+
+        val found = sourceDirs.asSequence()
+            .flatMap { sourceDir ->
+                sourceDir.listFiles().orEmpty().asSequence()
+                    .filter { it.isDirectory && !it.name.isNullOrBlank() }
+                    .map { it.name!! to it }
+            }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+        legacyFolderIndex[source.id] = LegacySourceFolders(rootUri, found)
+        return found
+    }
+
     /** Read at most 512 KiB of metadata, never the actual manga images. */
-    private fun hasVerifiedLegacyComicInfo(file: UniFile, expectedUrl: String): Boolean {
+    private fun hasVerifiedLegacyComicInfo(file: UniFile, expectedUrls: Set<String>): Boolean {
         return try {
             when {
                 file.isDirectory -> {
                     val xml = file.findFile("ComicInfo.xml")
                     xml != null && xml.isFile && xml.length() in 1..MAX_LEGACY_XML_BYTES &&
-                        xml.openInputStream().use { input -> comicInfoMatches(input, expectedUrl) }
+                        xml.openInputStream().use { input -> comicInfoMatches(input, expectedUrls) }
                 }
                 file.isFile && file.name?.endsWith(".cbz", ignoreCase = true) == true -> {
                     // Android document providers expose content:// URIs, not real file
@@ -223,7 +249,7 @@ class MangaDownloadProvider(
                         ZipFile(File(path)).use { zip ->
                             val xml = zip.getEntry("ComicInfo.xml")
                             xml != null && xml.size in 1..MAX_LEGACY_XML_BYTES &&
-                                zip.getInputStream(xml).use { input -> comicInfoMatches(input, expectedUrl) }
+                                zip.getInputStream(xml).use { input -> comicInfoMatches(input, expectedUrls) }
                         }
                     } else {
                         file.archiveReader(context).use { reader ->
@@ -239,7 +265,7 @@ class MangaDownloadProvider(
                                 }
                                 xml.size() in 1..MAX_LEGACY_XML_BYTES &&
                                     java.io.ByteArrayInputStream(xml.toByteArray()).use { bytes ->
-                                        comicInfoMatches(bytes, expectedUrl)
+                                        comicInfoMatches(bytes, expectedUrls)
                                     }
                             } ?: false
                         }
@@ -253,14 +279,14 @@ class MangaDownloadProvider(
         }
     }
 
-    private fun comicInfoMatches(input: java.io.InputStream, expectedUrl: String): Boolean {
+    private fun comicInfoMatches(input: java.io.InputStream, expectedUrls: Set<String>): Boolean {
         val parser = Xml.newPullParser()
         parser.setInput(input, Charsets.UTF_8.name())
         while (parser.eventType != XmlPullParser.END_DOCUMENT) {
             if (parser.eventType == XmlPullParser.START_TAG && parser.name == "Web") {
                 // Web can contain both tracking links and the chapter URL.
                 val urls = parser.nextText().split(Regex("\\s+"))
-                return urls.any { it.trim().trimEnd('/') == expectedUrl }
+                return urls.any { it.trim().trimEnd('/') in expectedUrls }
             }
             parser.next()
         }
@@ -269,6 +295,7 @@ class MangaDownloadProvider(
 
     private companion object {
         const val MAX_LEGACY_XML_BYTES = 512L * 1024
+        val SOURCE_ID_SUFFIX = Regex("__s_[0-9]+$")
     }
 
     /**
