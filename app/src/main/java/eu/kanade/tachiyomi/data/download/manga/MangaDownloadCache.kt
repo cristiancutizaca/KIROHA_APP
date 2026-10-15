@@ -256,15 +256,17 @@ class MangaDownloadCache(
      */
     fun getDownloadCount(manga: Manga): Int {
         renewCache()
+        val current = rootDownloadsDir.sourceDirs[manga.source]
+            ?.mangaDirs?.get(provider.getMangaDirName(manga.title, manga.url, manga.source))
+            ?.chapterDirs?.size ?: 0
 
-        val sourceDir = rootDownloadsDir.sourceDirs[manga.source]
-        if (sourceDir != null) {
-            val mangaDir = sourceDir.mangaDirs[provider.getMangaDirName(manga.title, manga.url, manga.source)]
-            if (mangaDir != null) {
-                return mangaDir.chapterDirs.size
-            }
+        // Report verified legacy chapters in the library's download counter.
+        // Don't claim unhashed same-title folders without URL verification.
+        val verifiedLegacy = legacyResults.entries.count { (key, downloaded) ->
+            downloaded && key.sourceId == manga.source &&
+                key.mangaUrl == manga.url && key.mangaTitle == manga.title
         }
-        return 0
+        return current + verifiedLegacy
     }
 
     /**
