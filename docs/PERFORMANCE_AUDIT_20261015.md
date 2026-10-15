@@ -17,6 +17,7 @@ Respaldos: `backup/main-before-optimization-20261015`. Primera versión que agru
 | Media | Los índices serializados se escribían directamente con `File.writeBytes`, pudiendo quedar truncados si Android mataba el proceso. | `android.util.AtomicFile` con `startWrite`, `finishWrite`, `failWrite` para preservar el índice anterior en caso de corte. |
 | Media | Las reconstrucciones fallidas actualizaban `lastRenew` y evitaban otros intentos hasta **una hora**. | `lastRenew` solo queda fijado tras una indexación completada; errores/cancelaciones pueden reintentarse. |
 | Media | `AnimeDownloadStore.restore()` resolvía anime/episodios con `runBlocking` individual, bloqueando el hilo restaurador. | `suspend fun restore()` + llamadas suspensivas directas al repositorio. |
+| Media | `MangaDownloadManager.startDownloadNow()` hacía una consulta SQL suspensiva mediante `runBlocking` desde una acción de usuario. | Buscar capítulos en `Dispatchers.IO` y volver a `Dispatchers.Main.immediate` únicamente para reordenar y guardar la cola. |
 | Media | `MoreViewModel` anidaba un `combine` dentro de otro; con cambios de manga cancelaba y re-suscribía innecesariamente los flujos de anime. | Un único `combine` de los cuatro `StateFlow` de colas y ejecución. |
 
 ## Por qué estos cambios son conservadores
