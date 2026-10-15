@@ -41,7 +41,7 @@ class SupportUsScreen : Screen() {
         Scaffold(
             topBar = {
                 AppBar(
-                    title = stringResource(MR.strings.label_support_us),
+                    title = stringResource(MR.strings.kiroha_project_title),
                     navigateUp = navigator::pop,
                 )
             },
