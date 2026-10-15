@@ -120,7 +120,12 @@ class MangaDownloadCache(
         val sourceId: Long,
     )
 
+    private data class LegacyMangaKey(val mangaUrl: String, val mangaTitle: String, val sourceId: Long)
+
     private val legacyResults = ConcurrentHashMap<LegacyChapterKey, Boolean>()
+    // O(1) download counters for large libraries. Counting all chapter checks
+    // for every library card was quadratic as the positive cache grew.
+    private val legacyCounts = ConcurrentHashMap<LegacyMangaKey, AtomicInteger>()
     private val legacyInFlight = ConcurrentHashMap.newKeySet<LegacyChapterKey>()
     private val pendingLegacyChecks = AtomicInteger(0)
     private val legacyGeneration = AtomicLong(0)
@@ -212,8 +217,12 @@ class MangaDownloadCache(
                         ) != null
                     }
                     if (generation != legacyGeneration.get()) return@launchIO
-                    legacyResults[key] = found
+                    val previous = legacyResults.put(key, found)
                     if (found) {
+                        if (previous != true) {
+                            val mangaKey = LegacyMangaKey(key.mangaUrl, key.mangaTitle, key.sourceId)
+                            legacyCounts.computeIfAbsent(mangaKey) { AtomicInteger(0) }.incrementAndGet()
+                        }
                         // Coalesce UI refreshes: finding hundreds of existing files
                         // must not trigger hundreds of simultaneous recompositions.
                         legacyNotificationJob?.cancel()
@@ -262,10 +271,7 @@ class MangaDownloadCache(
 
         // Report verified legacy chapters in the library's download counter.
         // Don't claim unhashed same-title folders without URL verification.
-        val verifiedLegacy = legacyResults.entries.count { (key, downloaded) ->
-            downloaded && key.sourceId == manga.source &&
-                key.mangaUrl == manga.url && key.mangaTitle == manga.title
-        }
+        val verifiedLegacy = legacyCounts[LegacyMangaKey(manga.url, manga.title, manga.source)]?.get() ?: 0
         return current + verifiedLegacy
     }
 
@@ -412,6 +418,7 @@ class MangaDownloadCache(
     fun invalidateCache() {
         legacyGeneration.incrementAndGet()
         legacyResults.clear()
+        legacyCounts.clear()
         provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
         renewalJob?.cancel()
