@@ -778,12 +778,15 @@ class MangaViewModel(
 
     private fun List<Chapter>.toChapterListItems(manga: Manga): List<ChapterList.Item> {
         val isLocal = manga.isLocal()
+        // A large series may have hundreds of chapters in the download queue.
+        // Build one lookup table, not a full queue search for every chapter.
+        val queuedByChapterId = if (isLocal) {
+            emptyMap()
+        } else {
+            downloadManager.queueState.value.associateBy { it.chapter.id }
+        }
         return map { chapter ->
-            val activeDownload = if (isLocal) {
-                null
-            } else {
-                downloadManager.getQueuedDownloadOrNull(chapter.id)
-            }
+            val activeDownload = queuedByChapterId[chapter.id]
             val downloaded = if (isLocal) {
                 true
             } else {
