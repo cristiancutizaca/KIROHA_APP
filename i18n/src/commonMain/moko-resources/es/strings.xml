@@ -961,6 +961,7 @@
     <string name="donationCampaign.paragraph3">KIROHA es un proyecto independiente de código abierto.</string>
     <string name="donationCampaign.dismiss">Cerrar</string>
     <string name="donationCampaign.contactPlatform">GitHub</string>
+    <string name="kiroha_project_title">Proyecto KIROHA</string>
     <string name="kiroha_project_description">KIROHA es un reproductor de anime y lector de manga de código abierto. Consulta el código, reporta problemas y revisa sus licencias aquí. Sin solicitudes de donaciones.</string>
     <string name="kiroha_project_source">Código fuente</string>
     <string name="kiroha_project_issues">Reportar un problema</string>
