@@ -174,13 +174,13 @@ class MangaDownloadProvider(
                     name = chapterName
                     scanlator = chapterScanlator
                 })
-            }.getOrNull()?.trim()?.trimEnd('/')?.let(::add)
+            }.getOrNull()?.trim()?.trimEnd('/')?.let { add(it) }
             runCatching {
                 httpSource.getMangaUrl(SManga.create().apply {
                     url = mangaUrl
                     title = mangaTitle
                 })
-            }.getOrNull()?.trim()?.trimEnd('/')?.let(::add)
+            }.getOrNull()?.trim()?.trimEnd('/')?.let { add(it) }
         }.filter { it.isNotBlank() }.toSet()
 
         val sourceFolders = legacySourceFolders(root, source)
