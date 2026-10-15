@@ -84,7 +84,7 @@
     <string name="label_extensions">Extensions</string>
     <string name="label_extension_info">Extension info</string>
     <string name="label_help">Help</string>
-    <string name="label_support_us">Support Us</string>
+    <string name="label_support_us">KIROHA project</string>
     <string name="label_default">Default</string>
     <string name="label_warning">Warning</string>
     <string name="label_auto">Auto</string>
@@ -1134,4 +1134,8 @@
     <string name="migrationListScreen.migrateDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.progressDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.matchWithoutChapterToast">No updates found, this entry cannot be used for migration</string>
+    <string name="kiroha_project_description">KIROHA is an independent open-source anime player and manga reader. Find the source code, report issues and read the licenses here. No donation requests.</string>
+    <string name="kiroha_project_source">Source code</string>
+    <string name="kiroha_project_issues">Report an issue</string>
+    <string name="kiroha_project_tagline">Anime and manga, your library, your device.</string>
 </resources>
