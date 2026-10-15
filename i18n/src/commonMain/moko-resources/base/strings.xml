@@ -1134,6 +1134,7 @@
     <string name="migrationListScreen.migrateDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.progressDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.matchWithoutChapterToast">No updates found, this entry cannot be used for migration</string>
+    <string name="kiroha_project_title">KIROHA project</string>
     <string name="kiroha_project_description">KIROHA is an independent open-source anime player and manga reader. Find the source code, report issues and read the licenses here. No donation requests.</string>
     <string name="kiroha_project_source">Source code</string>
     <string name="kiroha_project_issues">Report an issue</string>
