@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +46,7 @@ fun MiddlePlayerControls(
     // previous
     hasPrevious: Boolean,
     onSkipPrevious: () -> Unit,
+    onSeekBackward: () -> Unit,
 
     // middle
     isLoading: Boolean,
@@ -58,6 +61,7 @@ fun MiddlePlayerControls(
     // next
     hasNext: Boolean,
     onSkipNext: () -> Unit,
+    onSeekForward: () -> Unit,
 
     enter: EnterTransition,
     exit: ExitTransition,
@@ -66,7 +70,7 @@ fun MiddlePlayerControls(
     Row(
         modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.large),
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
     ) {
         AnimatedVisibility(
             visible = controlsShown && !areControlsLocked,
@@ -81,6 +85,21 @@ fun MiddlePlayerControls(
                     enabled = hasPrevious,
                 )
             }
+        }
+
+        AnimatedVisibility(
+            visible = controlsShown && !areControlsLocked && gestureSeekAmount == null,
+            enter = enter,
+            exit = exit,
+        ) {
+            ControlsButton(
+                icon = Icons.Filled.Replay10,
+                title = "−10s",
+                onClick = onSeekBackward,
+                iconSize = 28.dp,
+                horizontalSpacing = MaterialTheme.padding.small,
+                enabled = !isLoading && !isLoadingEpisode,
+            )
         }
 
         val icon = AnimatedImageVector.animatedVectorResource(R.drawable.anim_play_to_pause)
@@ -125,6 +144,21 @@ fun MiddlePlayerControls(
                     )
                 }
             }
+        }
+
+        AnimatedVisibility(
+            visible = controlsShown && !areControlsLocked && gestureSeekAmount == null,
+            enter = enter,
+            exit = exit,
+        ) {
+            ControlsButton(
+                icon = Icons.Filled.Forward10,
+                title = "+10s",
+                onClick = onSeekForward,
+                iconSize = 28.dp,
+                horizontalSpacing = MaterialTheme.padding.small,
+                enabled = !isLoading && !isLoadingEpisode,
+            )
         }
 
         AnimatedVisibility(
