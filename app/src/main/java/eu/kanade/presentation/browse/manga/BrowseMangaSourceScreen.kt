@@ -12,10 +12,12 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
+import kiroha.core.BrowseChronology
 import eu.kanade.presentation.browse.manga.components.BrowseMangaSourceComfortableGrid
 import eu.kanade.presentation.browse.manga.components.BrowseMangaSourceCompactGrid
 import eu.kanade.presentation.browse.manga.components.BrowseMangaSourceList
@@ -48,10 +50,20 @@ fun BrowseSourceContent(
     onWebViewClick: () -> Unit,
     onHelpClick: () -> Unit,
     onLocalSourceHelpClick: () -> Unit,
+    orderChronologically: Boolean = false,
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
 ) {
     val context = LocalContext.current
+
+    val snapshot = mangaList.itemSnapshotList
+    val displayOrder = remember(snapshot, orderChronologically, mangaList.itemCount) {
+        if (orderChronologically && snapshot.items.size == mangaList.itemCount) {
+            BrowseChronology.newestFirstIndices(snapshot.items.map { it.value.title })
+        } else {
+            null
+        }
+    }
 
     val errorState = mangaList.loadState.refresh.takeIf { it is LoadState.Error }
         ?: mangaList.loadState.append.takeIf { it is LoadState.Error }
@@ -121,6 +133,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.ComfortableGrid -> {
             BrowseMangaSourceComfortableGrid(
                 mangaList = mangaList,
+                displayOrder = displayOrder,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
@@ -132,6 +145,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.ComfortableGridPanorama -> {
             BrowseMangaSourceComfortableGrid(
                 mangaList = mangaList,
+                displayOrder = displayOrder,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
@@ -143,6 +157,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.List -> {
             BrowseMangaSourceList(
                 mangaList = mangaList,
+                displayOrder = displayOrder,
                 entries = entries,
                 topBarHeight = topBarHeight,
                 contentPadding = contentPadding,
@@ -154,6 +169,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.CompactGrid, LibraryDisplayMode.CoverOnlyGrid -> {
             BrowseMangaSourceCompactGrid(
                 mangaList = mangaList,
+                displayOrder = displayOrder,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,

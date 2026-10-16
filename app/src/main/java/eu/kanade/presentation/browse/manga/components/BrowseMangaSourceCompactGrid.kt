@@ -25,6 +25,7 @@ fun BrowseMangaSourceCompactGrid(
     mangaList: LazyPagingItems<StateFlow<Manga>>,
     columns: GridCells,
     contentPadding: PaddingValues,
+    displayOrder: List<Int>? = null,
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
 ) {
@@ -40,8 +41,21 @@ fun BrowseMangaSourceCompactGrid(
             }
         }
 
-        items(count = mangaList.itemCount) { index ->
-            val manga by mangaList[index]?.collectAsState() ?: return@items
+        items(
+            count = mangaList.itemCount,
+            key = { index ->
+                val sourceIndex = displayOrder?.getOrNull(index) ?: index
+                mangaList.peek(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
+                    ?: "manga-placeholder-$sourceIndex"
+            },
+        ) { index ->
+            // When visual items are reordered, prefetch must still touch
+            // the paging tail, regardless of its visual position.
+            if (displayOrder != null && index >= mangaList.itemCount - 12 && mangaList.itemCount > 0) {
+                mangaList[mangaList.itemCount - 1]
+            }
+            val sourceIndex = displayOrder?.getOrNull(index) ?: index
+            val manga by mangaList[sourceIndex]?.collectAsState() ?: return@items
             BrowseMangaSourceCompactGridItem(
                 manga = manga,
                 onClick = { onMangaClick(manga) },

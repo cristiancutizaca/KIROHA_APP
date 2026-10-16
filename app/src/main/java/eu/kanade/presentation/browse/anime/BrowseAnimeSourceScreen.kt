@@ -12,10 +12,12 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
+import kiroha.core.BrowseChronology
 import eu.kanade.presentation.browse.anime.components.BrowseAnimeSourceComfortableGrid
 import eu.kanade.presentation.browse.anime.components.BrowseAnimeSourceCompactGrid
 import eu.kanade.presentation.browse.anime.components.BrowseAnimeSourceList
@@ -49,10 +51,20 @@ fun BrowseAnimeSourceContent(
     onWebViewClick: () -> Unit,
     onHelpClick: () -> Unit,
     onLocalAnimeSourceHelpClick: () -> Unit,
+    orderChronologically: Boolean = false,
     onAnimeClick: (Anime) -> Unit,
     onAnimeLongClick: (Anime) -> Unit,
 ) {
     val context = LocalContext.current
+
+    val snapshot = animeList.itemSnapshotList
+    val displayOrder = remember(snapshot, orderChronologically, animeList.itemCount) {
+        if (orderChronologically && snapshot.items.size == animeList.itemCount) {
+            BrowseChronology.newestFirstIndices(snapshot.items.map { it.value.title })
+        } else {
+            null
+        }
+    }
 
     val errorState = animeList.loadState.refresh.takeIf { it is LoadState.Error }
         ?: animeList.loadState.append.takeIf { it is LoadState.Error }
@@ -122,6 +134,7 @@ fun BrowseAnimeSourceContent(
         LibraryDisplayMode.ComfortableGrid -> {
             BrowseAnimeSourceComfortableGrid(
                 animeList = animeList,
+                displayOrder = displayOrder,
                 columns = columns,
                 contentPadding = contentPadding,
                 onAnimeClick = onAnimeClick,
@@ -133,6 +146,7 @@ fun BrowseAnimeSourceContent(
         LibraryDisplayMode.ComfortableGridPanorama -> {
             BrowseAnimeSourceComfortableGrid(
                 animeList = animeList,
+                displayOrder = displayOrder,
                 columns = columns,
                 contentPadding = contentPadding,
                 onAnimeClick = onAnimeClick,
@@ -144,6 +158,7 @@ fun BrowseAnimeSourceContent(
         LibraryDisplayMode.List -> {
             BrowseAnimeSourceList(
                 animeList = animeList,
+                displayOrder = displayOrder,
                 entries = entries,
                 topBarHeight = topBarHeight,
                 contentPadding = contentPadding,
@@ -155,6 +170,7 @@ fun BrowseAnimeSourceContent(
         LibraryDisplayMode.CompactGrid, LibraryDisplayMode.CoverOnlyGrid -> {
             BrowseAnimeSourceCompactGrid(
                 animeList = animeList,
+                displayOrder = displayOrder,
                 columns = columns,
                 contentPadding = contentPadding,
                 onAnimeClick = onAnimeClick,

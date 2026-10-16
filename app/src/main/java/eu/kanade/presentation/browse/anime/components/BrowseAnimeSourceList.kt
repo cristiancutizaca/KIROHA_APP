@@ -26,6 +26,7 @@ fun BrowseAnimeSourceList(
     entries: Int,
     topBarHeight: Int,
     contentPadding: PaddingValues,
+    displayOrder: List<Int>? = null,
     onAnimeClick: (Anime) -> Unit,
     onAnimeLongClick: (Anime) -> Unit,
 ) {
@@ -44,8 +45,21 @@ fun BrowseAnimeSourceList(
                 }
             }
 
-            items(count = animeList.itemCount) { index ->
-                val anime by animeList[index]?.collectAsState() ?: return@items
+            items(
+                count = animeList.itemCount,
+                key = { index ->
+                    val sourceIndex = displayOrder?.getOrNull(index) ?: index
+                    animeList.peek(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
+                        ?: "anime-placeholder-$sourceIndex"
+                },
+            ) { index ->
+                // When visual items are reordered, prefetch must still touch
+                // the paging tail, regardless of its visual position.
+                if (displayOrder != null && index >= animeList.itemCount - 12 && animeList.itemCount > 0) {
+                    animeList[animeList.itemCount - 1]
+                }
+                val sourceIndex = displayOrder?.getOrNull(index) ?: index
+                val anime by animeList[sourceIndex]?.collectAsState() ?: return@items
                 BrowseAnimeSourceListItem(
                     anime = anime,
                     onClick = { onAnimeClick(anime) },
