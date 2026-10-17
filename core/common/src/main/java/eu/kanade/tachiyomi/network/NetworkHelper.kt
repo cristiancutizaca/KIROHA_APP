@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.network
 
 import android.content.Context
+import android.webkit.WebSettings
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -8,6 +9,7 @@ import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import eu.kanade.tachiyomi.network.interceptor.FlareSolverrInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
+import eu.kanade.tachiyomi.network.interceptor.TransientHttp520RetryInterceptor
 import kotlinx.coroutines.CoroutineScope
 import okhttp3.Cache
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -49,6 +51,7 @@ class NetworkHelper(
             .addInterceptor(BrotliInterceptor)
             .addInterceptor(UncaughtExceptionInterceptor())
             .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
+            .addInterceptor(TransientHttp520RetryInterceptor())
             .addInterceptor(FlareSolverrInterceptor(preferences))
 
         try {
@@ -143,7 +146,14 @@ class NetworkHelper(
     @Suppress("UNUSED")
     val cloudflareClient: OkHttpClient = client
 
-    fun defaultUserAgentProvider() = preferences.defaultUserAgent.get().trim()
+    private val webViewUserAgent: String by lazy {
+        runCatching { WebSettings.getDefaultUserAgent(context) }.getOrDefault("")
+    }
+
+    fun defaultUserAgentProvider(): String = UserAgentCompatibility.select(
+        preferences.defaultUserAgent.get(),
+        webViewUserAgent,
+    )
 
     private fun getTrustManager(): X509TrustManager {
         val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())

@@ -92,7 +92,7 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun \`chronological browsing reorders late newer results across loaded pages\`() {
+    fun `chronological browsing reorders late newer results across loaded pages`() {
         val titles = listOf("A (2026)", "B 2025", "C [2021]", "D (2026)")
         val order = BrowseChronology.newestFirstIndices(titles)
         assertEquals(listOf(0, 3, 1, 2), order)
@@ -100,13 +100,13 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun \`chronological browsing preserves undated source feeds\`() {
+    fun `chronological browsing preserves undated source feeds`() {
         assertNull(BrowseChronology.newestFirstIndices(listOf("Unknown", "A 2025", "Another", "Third")))
         assertNull(BrowseChronology.newestFirstIndices(listOf("A 2026", "B 2025", "C 2024")))
     }
 
     @Test
-    fun \`chronological browsing retains tie order and undated entries\`() {
+    fun `chronological browsing retains tie order and undated entries`() {
         val titles = listOf("A 2024", "Undated", "B 2026", "C 2026", "D 2022")
         assertEquals(listOf(2, 3, 0, 4, 1), BrowseChronology.newestFirstIndices(titles))
         assertEquals(2026, BrowseChronology.yearInTitle("1989 reboot 2026"))
