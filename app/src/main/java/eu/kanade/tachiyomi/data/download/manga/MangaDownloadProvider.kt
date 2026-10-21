@@ -224,19 +224,23 @@ class MangaDownloadProvider(
     }
 
     /**
-     * Recover a title-only gallery containing exactly ONE image chapter.
-     * Only the background cache may call this, after verifying both that the
-     * manga title is unique among library favorites for this source and that
-     * this manga has exactly one chapter. No renames or writes are performed.
+     * Read-only recovery of legacy title-only galleries when there is only ONE
+     * matching favorited manga for this source. The cache verifies ownership
+     * against the library and known chapters before invoking this.
+     * For multi-chapter works the chapter filename must also match. In a
+     * single-chapter gallery, the only image-bearing child is sufficient even
+     * when its old chapter label has changed.
      *
-     * Never use a namespaced source folder for this fallback: the legacy
-     * unsuffixed source name is the only safe candidate.
+     * Never infer ownership from a newer namespaced source directory.
      */
-    fun findUniqueLegacySingleChapterDir(
+    fun findUniqueLegacyChapterDir(
+        chapterName: String,
+        chapterScanlator: String?,
         chapterUrl: String,
         mangaTitle: String,
         source: MangaSource,
         mangaUrl: String,
+        allowUnnamedSingleChapter: Boolean,
     ): UniFile? {
         if (mangaUrl.isBlank() || chapterUrl.isBlank() || source !is HttpSource) return null
         val root = downloadsDir ?: return null
@@ -256,9 +260,17 @@ class MangaDownloadProvider(
         val chapters = gallery.listFiles().orEmpty().filter {
             it.isDirectory || (it.isFile && it.name?.endsWith(".cbz", ignoreCase = true) == true)
         }
-        // No guessing which chapter to associate in multi-chapter galleries.
-        if (chapters.size != 1) return null
-        val candidate = chapters.single()
+        // A distinct old chapter name can be associated without XML if the
+        // parent title belongs to one gallery in the saved library.
+        val acceptedNames = (getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl) +
+            getLegacyChapterDirNames(chapterName, chapterScanlator, chapterUrl)
+                .flatMap { listOf(it, "$it.cbz") }).toSet()
+        val named = chapters.filter { it.name in acceptedNames }
+        val candidate = when {
+            named.size == 1 -> named.single()
+            named.isEmpty() && allowUnnamedSingleChapter && chapters.size == 1 -> chapters.single()
+            else -> return null
+        }
         if (!containsUsableLegacyPages(candidate)) return null
 
         val ownershipKey = root.uri.toString() + "\u0000" + source.id + "\u0000" + gallery.uri.toString()
