@@ -58,6 +58,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.sync.Semaphore
@@ -131,6 +132,8 @@ class MangaDownloadCache(
     // for every library card was quadratic as the positive cache grew.
     private val legacyCounts = ConcurrentHashMap<LegacyMangaKey, AtomicInteger>()
     private val legacyInFlight = ConcurrentHashMap.newKeySet<LegacyChapterKey>()
+    private val deferredLegacyChecks = ConcurrentLinkedQueue<LegacyChapterKey>()
+    private val deferredLegacyCount = AtomicInteger(0)
     private val pendingLegacyChecks = AtomicInteger(0)
     private val legacyGeneration = AtomicLong(0)
     private val legacyProbeLimit = Semaphore(1)
@@ -162,6 +165,7 @@ class MangaDownloadCache(
 
     private companion object {
         const val MAX_PENDING_LEGACY_CHECKS = 24
+        const val MAX_DEFERRED_LEGACY_CHECKS = 4096
     }
 
     init {
@@ -228,7 +232,14 @@ class MangaDownloadCache(
             // scheduling thousands of coroutines waiting on one SD card.
             if (pendingLegacyChecks.incrementAndGet() > MAX_PENDING_LEGACY_CHECKS) {
                 pendingLegacyChecks.decrementAndGet()
-                legacyInFlight.remove(key)
+                // Don't silently lose all chapters beyond the first 24 visible.
+                // Keep a bounded, background-only queue and drain it as probes finish.
+                if (deferredLegacyCount.incrementAndGet() <= MAX_DEFERRED_LEGACY_CHECKS) {
+                    deferredLegacyChecks.offer(key)
+                } else {
+                    deferredLegacyCount.decrementAndGet()
+                    legacyInFlight.remove(key)
+                }
                 return false
             }
             val generation = legacyGeneration.get()
@@ -278,10 +289,32 @@ class MangaDownloadCache(
                 } finally {
                     legacyInFlight.remove(key)
                     pendingLegacyChecks.decrementAndGet()
+                    scheduleNextDeferredLegacyCheck()
                 }
             }
         }
         return false
+    }
+
+    private fun scheduleNextDeferredLegacyCheck() {
+        val next = deferredLegacyChecks.poll() ?: return
+        deferredLegacyCount.decrementAndGet()
+        legacyInFlight.remove(next)
+        scope.launchIO {
+            // Avoid saturating SAF/microSD when a large library first opens.
+            delay(125L)
+            if (legacyResults[next] == null) {
+                isChapterDownloaded(
+                    chapterName = next.chapterName,
+                    chapterScanlator = next.chapterScanlator,
+                    chapterUrl = next.chapterUrl,
+                    mangaTitle = next.mangaTitle,
+                    sourceId = next.sourceId,
+                    skipCache = false,
+                    mangaUrl = next.mangaUrl,
+                )
+            }
+        }
     }
 
     /**
@@ -458,6 +491,11 @@ class MangaDownloadCache(
         legacyGeneration.incrementAndGet()
         legacyResults.clear()
         legacyCounts.clear()
+        while (true) {
+            val deferred = deferredLegacyChecks.poll() ?: break
+            legacyInFlight.remove(deferred)
+        }
+        deferredLegacyCount.set(0)
         legacyLibraryOwners = null
         provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
