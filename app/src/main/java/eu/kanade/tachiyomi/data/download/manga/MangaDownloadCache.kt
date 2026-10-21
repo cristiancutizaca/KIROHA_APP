@@ -143,7 +143,7 @@ class MangaDownloadCache(
     private val legacyLibraryOwnerMutex = Mutex()
     @Volatile private var legacyLibraryOwners: Map<LegacyLibraryKey, String>? = null
 
-    private suspend fun hasUniqueSingleChapterOwnership(key: LegacyChapterKey): Boolean {
+    private suspend fun libraryChapterCountIfUniquelyOwned(key: LegacyChapterKey): Int? {
         val owners = legacyLibraryOwners ?: legacyLibraryOwnerMutex.withLock {
             legacyLibraryOwners ?: mangaRepository.getMangaFavorites()
                 .groupBy { LegacyLibraryKey(it.source, it.title) }
@@ -153,11 +153,11 @@ class MangaDownloadCache(
                 .toMap()
                 .also { legacyLibraryOwners = it }
         }
-        if (owners[LegacyLibraryKey(key.sourceId, key.mangaTitle)] != key.mangaUrl) return false
-        val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: return false
-        if (!manga.favorite) return false
+        if (owners[LegacyLibraryKey(key.sourceId, key.mangaTitle)] != key.mangaUrl) return null
+        val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: return null
+        if (!manga.favorite) return null
         val chapters = chapterRepository.getChapterByMangaId(manga.id)
-        return chapters.size == 1 && chapters.single().url == key.chapterUrl
+        return chapters.size.takeIf { it > 0 && chapters.any { chapter -> chapter.url == key.chapterUrl } }
     }
 
     private companion object {
@@ -243,12 +243,17 @@ class MangaDownloadCache(
                         val verified = provider.findVerifiedLegacyChapterDir(
                             chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
                         )
-                        verified != null || (
-                            hasUniqueSingleChapterOwnership(key) &&
-                                provider.findUniqueLegacySingleChapterDir(
-                                    chapterUrl, mangaTitle, source, mangaUrl,
-                                ) != null
-                            )
+                        verified != null || libraryChapterCountIfUniquelyOwned(key)?.let { count ->
+                            provider.findUniqueLegacyChapterDir(
+                                chapterName = chapterName,
+                                chapterScanlator = chapterScanlator,
+                                chapterUrl = chapterUrl,
+                                mangaTitle = mangaTitle,
+                                source = source,
+                                mangaUrl = mangaUrl,
+                                allowUnnamedSingleChapter = count == 1,
+                            ) != null
+                        } == true
                     }
                     if (generation != legacyGeneration.get()) return@launchIO
                     val previous = legacyResults.put(key, found)
