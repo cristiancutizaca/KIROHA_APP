@@ -51,11 +51,25 @@ class MangaDownloadProvider(
     // A legacy source may contain hundreds of title folders. Index it once in
     // memory so checking each chapter does not enumerate the same directory
     // hundreds of times. This index never moves or rewrites user files.
-    private data class LegacySourceFolders(val rootUri: String, val folders: Map<String, List<UniFile>>)
+    private data class LegacySourceFolders(
+        val rootUri: String,
+        val folders: Map<String, List<UniFile>>,
+        val unnamespacedFolders: Map<String, List<UniFile>>,
+    )
     private val legacyFolderIndex = ConcurrentHashMap<Long, LegacySourceFolders>()
+
+    // A title-only folder cannot identify the gallery by itself. A recovered
+    // single-chapter download is shared with the reader only AFTER the cache
+    // has checked that this is the sole matching item in the user's library.
+    private data class RecoveredChapterKey(val sourceId: Long, val mangaUrl: String, val chapterUrl: String)
+    private data class RecoveredChapter(val rootUri: String, val file: UniFile)
+    private val recoveredChapters = ConcurrentHashMap<RecoveredChapterKey, RecoveredChapter>()
+    private val claimedGalleryOwners = ConcurrentHashMap<String, String>()
 
     fun invalidateLegacyFolderIndex() {
         legacyFolderIndex.clear()
+        recoveredChapters.clear()
+        claimedGalleryOwners.clear()
     }
 
     /**
@@ -122,9 +136,12 @@ class MangaDownloadProvider(
         val current = getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl).asSequence()
             .mapNotNull { mangaDir?.findFile(it) }
             .firstOrNull()
-        // New downloads keep their source ID + manga URL identity. Legacy folders
-        // are only read after their embedded chapter URL proves ownership.
-        return current ?: findVerifiedLegacyChapterDir(
+        // The async cache may have safely associated an old title-only folder
+        // with this specific URL. Reuse that association in the reader.
+        val claim = mangaUrl?.let { recoveredChapters[RecoveredChapterKey(source.id, it, chapterUrl)] }
+        val recovered = claim?.takeIf { it.rootUri == downloadsDir?.uri?.toString() }
+            ?.file?.takeIf { it.exists() }
+        return current ?: recovered ?: findVerifiedLegacyChapterDir(
             chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
         )
     }
@@ -206,9 +223,72 @@ class MangaDownloadProvider(
             }
     }
 
-    private fun legacySourceFolders(root: UniFile, source: MangaSource): Map<String, List<UniFile>> {
+    /**
+     * Recover a title-only gallery containing exactly ONE image chapter.
+     * Only the background cache may call this, after verifying both that the
+     * manga title is unique among library favorites for this source and that
+     * this manga has exactly one chapter. No renames or writes are performed.
+     *
+     * Never use a namespaced source folder for this fallback: the legacy
+     * unsuffixed source name is the only safe candidate.
+     */
+    fun findUniqueLegacySingleChapterDir(
+        chapterUrl: String,
+        mangaTitle: String,
+        source: MangaSource,
+        mangaUrl: String,
+    ): UniFile? {
+        if (mangaUrl.isBlank() || chapterUrl.isBlank() || source !is HttpSource) return null
+        val root = downloadsDir ?: return null
+        val titleVariants = listOf(
+            libraryPreferences.disallowNonAsciiFilenames.get(),
+            !libraryPreferences.disallowNonAsciiFilenames.get(),
+        ).map { asciiOnly ->
+            DiskUtil.buildValidFilename(mangaTitle, DiskUtil.MAX_FILE_NAME_BYTES, asciiOnly)
+        }.distinct()
+
+        val folderIndex = legacySourceFolders(root, source, unnamespacedOnly = true)
+        val galleries = titleVariants.flatMap { folderIndex[it].orEmpty() }
+            .distinctBy { it.uri.toString() }
+        // Duplicate title folders, even across old source roots, are ambiguous.
+        if (galleries.size != 1) return null
+        val gallery = galleries.single()
+        val chapters = gallery.listFiles().orEmpty().filter {
+            it.isDirectory || (it.isFile && it.name?.endsWith(".cbz", ignoreCase = true) == true)
+        }
+        // No guessing which chapter to associate in multi-chapter galleries.
+        if (chapters.size != 1) return null
+        val candidate = chapters.single()
+        if (!containsUsableLegacyPages(candidate)) return null
+
+        val ownershipKey = root.uri.toString() + "\u0000" + source.id + "\u0000" + gallery.uri.toString()
+        val existingOwner = claimedGalleryOwners.putIfAbsent(ownershipKey, mangaUrl)
+        if (existingOwner != null && existingOwner != mangaUrl) return null
+        recoveredChapters[RecoveredChapterKey(source.id, mangaUrl, chapterUrl)] =
+            RecoveredChapter(root.uri.toString(), candidate)
+        return candidate
+    }
+
+    private fun containsUsableLegacyPages(file: UniFile): Boolean {
+        if (file.isFile) {
+            return file.name?.endsWith(".cbz", ignoreCase = true) == true && file.length() > 512L
+        }
+        if (!file.isDirectory) return false
+        return file.listFiles().orEmpty().any { page ->
+            page.isFile && page.length() > 0L &&
+                page.name.orEmpty().substringAfterLast('.', "").lowercase() in LEGACY_IMAGE_EXTENSIONS
+        }
+    }
+
+    private fun legacySourceFolders(
+        root: UniFile,
+        source: MangaSource,
+        unnamespacedOnly: Boolean = false,
+    ): Map<String, List<UniFile>> {
         val rootUri = root.uri.toString()
-        legacyFolderIndex[source.id]?.takeIf { it.rootUri == rootUri }?.let { return it.folders }
+        legacyFolderIndex[source.id]?.takeIf { it.rootUri == rootUri }?.let {
+            return if (unnamespacedOnly) it.unnamespacedFolders else it.folders
+        }
 
         val expectedLabels = listOf(
             libraryPreferences.disallowNonAsciiFilenames.get(),
@@ -227,15 +307,16 @@ class MangaDownloadProvider(
             }
             .sortedWith(compareBy<UniFile> { it.name !in expectedLabels }.thenBy { it.name.orEmpty() })
 
-        val found = sourceDirs.asSequence()
-            .flatMap { sourceDir ->
-                sourceDir.listFiles().orEmpty().asSequence()
-                    .filter { it.isDirectory && !it.name.isNullOrBlank() }
-                    .map { it.name!! to it }
-            }
-            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
-        legacyFolderIndex[source.id] = LegacySourceFolders(rootUri, found)
-        return found
+        val entries = sourceDirs.flatMap { sourceDir ->
+            sourceDir.listFiles().orEmpty()
+                .filter { it.isDirectory && !it.name.isNullOrBlank() }
+                .map { Triple(sourceDir.name in expectedLabels, it.name!!, it) }
+        }
+        val found = entries.groupBy(keySelector = { it.second }, valueTransform = { it.third })
+        val oldOnly = entries.filter { it.first }
+            .groupBy(keySelector = { it.second }, valueTransform = { it.third })
+        legacyFolderIndex[source.id] = LegacySourceFolders(rootUri, found, oldOnly)
+        return if (unnamespacedOnly) oldOnly else found
     }
 
     /** Read at most 512 KiB of metadata, never the actual manga images. */
@@ -303,6 +384,9 @@ class MangaDownloadProvider(
 
     private companion object {
         const val MAX_LEGACY_XML_BYTES = 512L * 1024
+        val LEGACY_IMAGE_EXTENSIONS = setOf(
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "jxl", "heic", "heif",
+        )
     }
 
     /**
