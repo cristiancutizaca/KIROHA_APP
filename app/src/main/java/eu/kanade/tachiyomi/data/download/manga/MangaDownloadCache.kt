@@ -50,6 +50,8 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.entries.manga.model.Manga
 import tachiyomi.domain.items.chapter.model.Chapter
+import tachiyomi.domain.entries.manga.repository.MangaRepository
+import tachiyomi.domain.items.chapter.repository.ChapterRepository
 import tachiyomi.domain.source.manga.service.MangaSourceManager
 import tachiyomi.domain.storage.service.StorageManager
 import uy.kohesive.injekt.Injekt
@@ -77,6 +79,8 @@ class MangaDownloadCache(
     private val sourceManager: MangaSourceManager,
     private val extensionManager: MangaExtensionManager,
     private val storageManager: StorageManager,
+    private val mangaRepository: MangaRepository,
+    private val chapterRepository: ChapterRepository,
 ) {
 
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -131,6 +135,30 @@ class MangaDownloadCache(
     private val legacyGeneration = AtomicLong(0)
     private val legacyProbeLimit = Semaphore(1)
     private var legacyNotificationJob: Job? = null
+
+    // A title-only folder is eligible for automatic recovery ONLY when exactly
+    // one favorited manga from this source has that title. Snapshot the titles
+    // once instead of querying a large library for every chapter.
+    private data class LegacyLibraryKey(val sourceId: Long, val title: String)
+    private val legacyLibraryOwnerMutex = Mutex()
+    @Volatile private var legacyLibraryOwners: Map<LegacyLibraryKey, String>? = null
+
+    private suspend fun hasUniqueSingleChapterOwnership(key: LegacyChapterKey): Boolean {
+        val owners = legacyLibraryOwners ?: legacyLibraryOwnerMutex.withLock {
+            legacyLibraryOwners ?: mangaRepository.getMangaFavorites()
+                .groupBy { LegacyLibraryKey(it.source, it.title) }
+                .mapNotNull { (folderKey, manga) ->
+                    if (manga.size == 1) folderKey to manga.single().url else null
+                }
+                .toMap()
+                .also { legacyLibraryOwners = it }
+        }
+        if (owners[LegacyLibraryKey(key.sourceId, key.mangaTitle)] != key.mangaUrl) return false
+        val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: return false
+        if (!manga.favorite) return false
+        val chapters = chapterRepository.getChapterByMangaId(manga.id)
+        return chapters.size == 1 && chapters.single().url == key.chapterUrl
+    }
 
     private companion object {
         const val MAX_PENDING_LEGACY_CHECKS = 24
@@ -212,9 +240,15 @@ class MangaDownloadCache(
                     sourceManager.isInitialized.first { it }
                     val found = legacyProbeLimit.withPermit {
                         val source = sourceManager.getOrStub(sourceId)
-                        provider.findVerifiedLegacyChapterDir(
+                        val verified = provider.findVerifiedLegacyChapterDir(
                             chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
-                        ) != null
+                        )
+                        verified != null || (
+                            hasUniqueSingleChapterOwnership(key) &&
+                                provider.findUniqueLegacySingleChapterDir(
+                                    chapterUrl, mangaTitle, source, mangaUrl,
+                                ) != null
+                            )
                     }
                     if (generation != legacyGeneration.get()) return@launchIO
                     val previous = legacyResults.put(key, found)
@@ -419,6 +453,7 @@ class MangaDownloadCache(
         legacyGeneration.incrementAndGet()
         legacyResults.clear()
         legacyCounts.clear()
+        legacyLibraryOwners = null
         provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
         renewalJob?.cancel()
