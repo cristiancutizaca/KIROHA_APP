@@ -283,9 +283,26 @@ class MangaDownloadProvider(
 
     private fun containsUsableLegacyPages(file: UniFile): Boolean {
         if (file.isFile) {
-            return file.name?.endsWith(".cbz", ignoreCase = true) == true && file.length() > 512L
+            if (file.name?.endsWith(".cbz", ignoreCase = true) != true || file.length() <= 512L) {
+                return false
+            }
+            // If explicit identity metadata exists it MUST match via the
+            // verified recovery path; never override a conflicting ComicInfo.
+            return try {
+                if (file.uri.scheme == "file") {
+                    ZipFile(File(file.uri.path ?: return false)).use { zip ->
+                        zip.getEntry("ComicInfo.xml") == null
+                    }
+                } else {
+                    file.archiveReader(context).use { reader ->
+                        reader.getInputStream("ComicInfo.xml")?.use { false } ?: true
+                    }
+                }
+            } catch (_: Exception) {
+                false
+            }
         }
-        if (!file.isDirectory) return false
+        if (!file.isDirectory || file.findFile("ComicInfo.xml") != null) return false
         return file.listFiles().orEmpty().any { page ->
             page.isFile && page.length() > 0L &&
                 page.name.orEmpty().substringAfterLast('.', "").lowercase() in LEGACY_IMAGE_EXTENSIONS
