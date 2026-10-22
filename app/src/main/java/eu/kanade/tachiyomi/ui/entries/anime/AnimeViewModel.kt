@@ -800,10 +800,15 @@ class AnimeViewModel(
             val modifiedIndex = successState.episodes.indexOfFirst { it.id == download.episode.id }
             if (modifiedIndex < 0) return@updateSuccessState successState
 
+            val currentItem = successState.episodes[modifiedIndex]
+            if (currentItem.downloadState == download.status &&
+                currentItem.downloadProgress == download.progress
+            ) {
+                return@updateSuccessState successState
+            }
+
             val newEpisodes = successState.episodes.toMutableList().apply {
-                val item = removeAt(modifiedIndex)
-                    .copy(downloadState = download.status, downloadProgress = download.progress)
-                add(modifiedIndex, item)
+                set(modifiedIndex, currentItem.copy(downloadState = download.status, downloadProgress = download.progress))
             }
             successState.copy(episodes = newEpisodes)
         }
@@ -811,12 +816,15 @@ class AnimeViewModel(
 
     private fun List<Episode>.toEpisodeListItems(anime: Anime): List<EpisodeList.Item> {
         val isLocal = anime.isLocal()
+        // Build the queue lookup once. Searching the entire queue per episode
+        // caused quadratic work when opening long series while downloading.
+        val queuedByEpisodeId = if (isLocal) {
+            emptyMap()
+        } else {
+            downloadManager.queueState.value.associateBy { it.episode.id }
+        }
         return map { episode ->
-            val activeDownload = if (isLocal) {
-                null
-            } else {
-                downloadManager.getQueuedDownloadOrNull(episode.id)
-            }
+            val activeDownload = queuedByEpisodeId[episode.id]
             val downloaded = if (isLocal) {
                 true
             } else {
