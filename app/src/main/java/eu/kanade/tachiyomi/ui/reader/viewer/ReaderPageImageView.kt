@@ -22,6 +22,7 @@ import coil3.BitmapImage
 import coil3.asDrawable
 import coil3.dispose
 import coil3.imageLoader
+import coil3.request.Disposable
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -58,6 +59,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
 ) : FrameLayout(context, attrs, defStyleAttrs, defStyleRes) {
 
     private var pageView: View? = null
+
+    // Requests using lambda targets are not bound to ImageView lifecycle.
+    // Cancel them when a page is replaced/recycled so old pages cannot retain the reader view.
+    private var imageRequest: Disposable? = null
+
+    private fun cancelImageRequest() {
+        imageRequest?.dispose()
+        imageRequest = null
+    }
 
     private var config: Config? = null
 
@@ -140,6 +150,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     fun setImage(drawable: Drawable, config: Config) {
+        cancelImageRequest()
         this.config = config
         if (drawable is Animatable) {
             prepareAnimatedImageView()
@@ -151,6 +162,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
+        cancelImageRequest()
         this.config = config
         if (isAnimated) {
             prepareAnimatedImageView()
@@ -161,12 +173,22 @@ open class ReaderPageImageView @JvmOverloads constructor(
         }
     }
 
-    fun recycle() = pageView?.let {
-        when (it) {
-            is SubsamplingScaleImageView -> it.recycle()
-            is AppCompatImageView -> it.dispose()
+    fun recycle() {
+        cancelImageRequest()
+        pageView?.let {
+            when (it) {
+                is SubsamplingScaleImageView -> it.recycle()
+                is AppCompatImageView -> {
+                    (it.drawable as? Animatable)?.stop()
+                    it.dispose()
+                    it.setImageDrawable(null)
+                }
+            }
+            it.isVisible = false
         }
-        it.isVisible = false
+        // Background artwork can otherwise remain referenced by a recycled holder.
+        pageBackground = null
+        background = null
     }
 
     /**
@@ -319,7 +341,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .customDecoder(true)
                     .crossfade(false)
                     .build()
-                    .let(context.imageLoader::enqueue)
+                    .let { imageRequest = context.imageLoader.enqueue(it) }
             }
 
             else -> {
@@ -393,7 +415,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             )
             .crossfade(false)
             .build()
-        context.imageLoader.enqueue(request)
+        imageRequest = context.imageLoader.enqueue(request)
     }
 
     private fun Int.getSystemScaledDuration(): Int {
