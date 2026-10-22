@@ -89,6 +89,9 @@ abstract class SourcePagingSource(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            // Preserve the extension exception for the UI, but log the source/page
+            // that failed (e.g. an extension calling subList(25, 1)).
+            Log.e("KirohaPaging", "type=manga source=${source.id} page=$page load failed", e)
             return LoadResult.Error(e)
         }
     }
