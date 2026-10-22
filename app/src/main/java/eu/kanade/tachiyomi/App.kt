@@ -21,6 +21,7 @@ import aniyomi.core.common.torrent.TorrentServerApi
 import aniyomi.core.common.torrent.TorrentServerUtils
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowRgb565
 import coil3.request.crossfade
@@ -685,6 +686,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     override fun newImageLoader(context: Context): ImageLoader {
         return ImageLoader.Builder(this).apply {
             val callFactoryLazy = lazy { networkHelper.client }
+            // Keep recently viewed covers bounded. Large manga pages need headroom
+            // even on devices with a large ART heap.
+            memoryCache {
+                MemoryCache.Builder()
+                    .maxSizePercent(this@App, if (DeviceUtil.isLowRamDevice(this@App)) 0.08 else 0.10)
+                    .build()
+            }
             components {
                 // NetworkFetcher.Factory
                 add(OkHttpNetworkFetcherFactory(callFactoryLazy::value))
@@ -715,8 +723,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             if (networkPreferences.verboseLogging().get()) logger(DebugLogger())
 
             // Coil spawns a new thread for every image load by default
-            fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(8))
-            decoderCoroutineContext(Dispatchers.IO.limitedParallelism(3))
+            fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(4))
+            decoderCoroutineContext(Dispatchers.IO.limitedParallelism(2))
         }
             .build()
     }
