@@ -1,5 +1,14 @@
 # Kiroha v0.1 — Problemas conocidos y validación
 
+## Reporte nuevo: lentitud al abrir varias historias y cierres (21/10/2026)
+
+- En APK DEBUG (`app.kiroha.mobile.dev`), navegar consecutivamente entre varias historias/series termina provocando cargas muy lentas; a veces se muestra pantalla negra con indicador de progreso, y el proceso se cierra ocasionalmente.
+- La captura incluye un video en ventana flotante/PiP. Esto podría aumentar presión de memoria, pero **no prueba la causa**. Reproducir también sin PiP, con descargas pausadas y sin reindexación.
+- Ajustes conservadores de código en `main` (21/10): el detalle de anime ahora indexa la cola de descargas una sola vez por reconstrucción y tanto anime como manga evitan recrear su lista completa cuando el estado de descarga recibido no cambió.
+- **Pendiente y obligatorio:** perfilar apertura de 15–30 fichas consecutivas, RAM/PSS, GC, jank y tiempo hasta visualizar ficha; extraer `logcat` tras un cierre (`FATAL EXCEPTION`, `OutOfMemoryError` o finalización del proceso por Android). Examinar ViewModels y colecciones que sobreviven en backstack, Coil/bitmaps, solicitudes concurrentes y acceso SAF a microSD.
+- **No se considera resuelto:** faltan APK actualizada, compilación exitosa y reproducción real con registros. CI sigue fallando antes de ejecutar los pasos del job.
+
+
 Actualizado: 13/10/2026. **Rama de trabajo: `main`. Cambios de fuente aplicados, compilación nueva y pruebas físicas PENDIENTES.**
 
 ## Reportado por pruebas reales antes de estos cambios
