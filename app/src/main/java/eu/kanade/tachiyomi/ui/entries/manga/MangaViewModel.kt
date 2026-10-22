@@ -767,10 +767,15 @@ class MangaViewModel(
             val modifiedIndex = successState.chapters.indexOfFirst { it.id == download.chapter.id }
             if (modifiedIndex < 0) return@updateSuccessState successState
 
+            val currentItem = successState.chapters[modifiedIndex]
+            if (currentItem.downloadState == download.status &&
+                currentItem.downloadProgress == download.progress
+            ) {
+                return@updateSuccessState successState
+            }
+
             val newChapters = successState.chapters.toMutableList().apply {
-                val item = removeAt(modifiedIndex)
-                    .copy(downloadState = download.status, downloadProgress = download.progress)
-                add(modifiedIndex, item)
+                set(modifiedIndex, currentItem.copy(downloadState = download.status, downloadProgress = download.progress))
             }
             successState.copy(chapters = newChapters)
         }
