@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.firstOrNull
@@ -216,9 +217,9 @@ class BrowseAnimeSourceViewModel(
      * Flow of Pager flow tied to [State.listing]
      */
     private val hideInLibraryItems = sourcePreferences.hideInAnimeLibraryItems.get()
-    val animePagerFlowFlow = state.map { it.listing }
+    val animePagerFlow = state.map { it.listing }
         .distinctUntilChanged()
-        .map { listing ->
+        .flatMapLatest { listing ->
             Pager(PagingConfig(pageSize = 25, prefetchDistance = 12, initialLoadSize = 25)) {
                 getRemoteAnime.subscribe(sourceId, listing.query ?: "", listing.filters)
             }.flow.map { pagingData ->
@@ -233,9 +234,10 @@ class BrowseAnimeSourceViewModel(
                 }
                     .filter { !hideInLibraryItems || !it.value.favorite }
             }
-                .cachedIn(viewModelScope)
         }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyFlow())
+        // Cache only the active listing generation; previously each new listing
+        // created an independently cached flow retained for the ViewModel lifetime.
+        .cachedIn(viewModelScope)
 
     fun getColumnsPreference(orientation: Int): GridCells {
         val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
