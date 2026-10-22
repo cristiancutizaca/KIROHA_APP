@@ -775,7 +775,10 @@ class MangaViewModel(
             }
 
             val newChapters = successState.chapters.toMutableList().apply {
-                set(modifiedIndex, currentItem.copy(downloadState = download.status, downloadProgress = download.progress))
+                this[modifiedIndex] = currentItem.copy(
+                    downloadState = download.status,
+                    downloadProgress = download.progress,
+                )
             }
             successState.copy(chapters = newChapters)
         }
