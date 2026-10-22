@@ -808,7 +808,10 @@ class AnimeViewModel(
             }
 
             val newEpisodes = successState.episodes.toMutableList().apply {
-                set(modifiedIndex, currentItem.copy(downloadState = download.status, downloadProgress = download.progress))
+                this[modifiedIndex] = currentItem.copy(
+                    downloadState = download.status,
+                    downloadProgress = download.progress,
+                )
             }
             successState.copy(episodes = newEpisodes)
         }
