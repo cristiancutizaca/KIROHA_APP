@@ -67,7 +67,7 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
-import mihon.presentation.core.util.collectAsLazyPagingItems
+import androidx.paging.compose.collectAsLazyPagingItems
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.source.anime.model.StubAnimeSource
 import tachiyomi.i18n.MR
@@ -283,7 +283,7 @@ data class BrowseAnimeSourceScreen(
         ) { paddingValues ->
             BrowseAnimeSourceContent(
                 source = viewModel.source,
-                animeList = viewModel.animePagerFlowFlow.collectAsLazyPagingItems(),
+                animeList = viewModel.animePagerFlow.collectAsLazyPagingItems(),
                 columns = viewModel.getColumnsPreference(LocalConfiguration.current.orientation),
                 entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
                 topBarHeight = topBarHeight,
