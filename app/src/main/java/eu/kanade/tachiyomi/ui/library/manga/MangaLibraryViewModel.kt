@@ -118,8 +118,20 @@ class MangaLibraryViewModel(
     // SY <--
 ) : ViewModel() {
 
+    // Keep the last rendered library while navigation recreates this ViewModel.
+    // Database flows still refresh it reactively after returning from the reader.
+    private companion object {
+        @Volatile
+        var lastRenderedLibrary: MangaLibraryMap? = null
+    }
+
     val state: StateFlow<MangaLibraryViewModel.State>
-        field = MutableStateFlow<MangaLibraryViewModel.State>(State())
+        field = MutableStateFlow<MangaLibraryViewModel.State>(
+            State(
+                isLoading = lastRenderedLibrary == null,
+                library = lastRenderedLibrary ?: emptyMap(),
+            ),
+        )
 
     var activeCategoryIndex: Int by libraryPreferences.lastUsedCategory.asState(
         viewModelScope,
@@ -160,6 +172,7 @@ class MangaLibraryViewModel(
                     }
             }
                 .collectLatest {
+                    lastRenderedLibrary = it
                     state.update { state ->
                         state.copy(
                             isLoading = false,
