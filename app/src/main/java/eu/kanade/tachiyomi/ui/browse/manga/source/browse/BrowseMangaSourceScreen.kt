@@ -240,7 +240,7 @@ data class BrowseMangaSourceScreen(
                 entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
                 topBarHeight = topBarHeight,
                 displayMode = viewModel.displayMode,
-                orderChronologically = state.listing == Listing.Latest,
+                orderChronologically = state.listing == Listing.Latest || state.listing is Listing.Search,
                 snackbarHostState = snackbarHostState,
                 contentPadding = paddingValues,
                 onWebViewClick = onWebViewClick,
