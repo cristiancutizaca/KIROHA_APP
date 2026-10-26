@@ -33,7 +33,7 @@ import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.launch
-import mihon.presentation.core.util.collectAsLazyPagingItems
+import androidx.paging.compose.collectAsLazyPagingItems
 import tachiyomi.domain.entries.anime.model.Anime
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.tail.TLMR
@@ -97,7 +97,7 @@ data class AnimeSourceSearchScreen(
             }
             BrowseAnimeSourceContent(
                 source = viewModel.source,
-                animeList = viewModel.animePagerFlowFlow.collectAsLazyPagingItems(),
+                animeList = viewModel.animePagerFlow.collectAsLazyPagingItems(),
                 columns = viewModel.getColumnsPreference(LocalConfiguration.current.orientation),
                 displayMode = viewModel.displayMode,
                 snackbarHostState = snackbarHostState,
