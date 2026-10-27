@@ -216,9 +216,9 @@ class BrowseAnimeSourceViewModel(
      * Flow of Pager flow tied to [State.listing]
      */
     private val hideInLibraryItems = sourcePreferences.hideInAnimeLibraryItems.get()
-    val animePagerFlow = state.map { it.listing }
+    val animePagerFlow = state.map { it.listing to it.searchGeneration }
         .distinctUntilChanged()
-        .flatMapLatest { listing ->
+        .flatMapLatest { (listing, _) ->
             Pager(PagingConfig(pageSize = 25, prefetchDistance = 12, initialLoadSize = 25)) {
                 getRemoteAnime.subscribe(sourceId, listing.query ?: "", listing.filters)
             }.flow.map { pagingData ->
@@ -315,6 +315,8 @@ class BrowseAnimeSourceViewModel(
                     // KMK <--
                 ),
                 toolbarQuery = query ?: input.query,
+                // Re-run searches even when the same text and filters are submitted.
+                searchGeneration = it.searchGeneration + 1,
             )
         }
     }
@@ -517,6 +519,7 @@ class BrowseAnimeSourceViewModel(
     @Immutable
     data class State(
         val listing: Listing,
+        val searchGeneration: Long = 0,
         val filters: FilterList = FilterList(),
         val toolbarQuery: String? = null,
         val dialog: Dialog? = null,
