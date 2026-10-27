@@ -633,8 +633,12 @@ class ReaderViewModel(
         if (!incognitoMode && page.status != Page.State.ERROR) {
             readerChapter.chapter.last_page_read = pageIndex
 
-            if (readerChapter.pages?.lastIndex == pageIndex) {
-                updateChapterProgressOnComplete(readerChapter)
+            val completedChapter = readerChapter.pages?.lastIndex == pageIndex
+            if (completedChapter) {
+                // Publish the read flag to the database BEFORE optional duplicate
+                // chapter tracking. The library's "unread only" filter observes
+                // this database value and should react as soon as reading ends.
+                readerChapter.chapter.read = true
             }
 
             updateChapter.await(
@@ -644,6 +648,9 @@ class ReaderViewModel(
                     lastPageRead = readerChapter.chapter.last_page_read.toLong(),
                 ),
             )
+            if (completedChapter) {
+                updateChapterProgressOnComplete(readerChapter)
+            }
             appendKirohaProgress(readerChapter, pageIndex)
         }
     }
