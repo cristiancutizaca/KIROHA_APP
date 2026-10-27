@@ -207,6 +207,13 @@ class MangaDownloadQueueViewModel(
 
             MangaDownload.State.ERROR -> cancelProgressJob(download)
 
+            MangaDownload.State.QUEUE -> {
+                // A manual pause must immediately update the visible progress
+                // and release subscriptions to the inactive job.
+                cancelProgressJob(download)
+                onUpdateProgress(download)
+            }
+
             else -> {
                 /* unused */
             }
