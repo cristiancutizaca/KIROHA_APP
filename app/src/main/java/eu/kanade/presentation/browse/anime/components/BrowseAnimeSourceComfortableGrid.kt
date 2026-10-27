@@ -29,6 +29,10 @@ fun BrowseAnimeSourceComfortableGrid(
     onAnimeClick: (Anime) -> Unit,
     onAnimeLongClick: (Anime) -> Unit,
 ) {
+    // Compose may still request old item keys while a new search replaces the paging data.
+    // Keep keys and the item count bound to the same immutable snapshot.
+    val keySnapshot = animeList.itemSnapshotList
+    val snapshotCount = keySnapshot.size
     LazyVerticalGrid(
         columns = columns,
         contentPadding = contentPadding + PaddingValues(8.dp),
@@ -42,19 +46,22 @@ fun BrowseAnimeSourceComfortableGrid(
         }
 
         items(
-            count = animeList.itemCount,
+            count = snapshotCount,
             key = { index ->
                 val sourceIndex = displayOrder?.getOrNull(index) ?: index
-                animeList.peek(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
+                keySnapshot.getOrNull(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
                     ?: "anime-placeholder-$sourceIndex"
             },
         ) { index ->
-            // When visual items are reordered, prefetch must still touch
-            // the paging tail, regardless of its visual position.
-            if (displayOrder != null && index >= animeList.itemCount - 12 && animeList.itemCount > 0) {
-                animeList[animeList.itemCount - 1]
-            }
             val sourceIndex = displayOrder?.getOrNull(index) ?: index
+            // This composition may outlive its paging generation for a frame.
+            // Never index the next search's shorter list with an old layout position.
+            val currentCount = animeList.itemCount
+            if (sourceIndex !in 0 until currentCount) return@items
+            // When visually reordered, still prefetch the loaded paging tail.
+            if (displayOrder != null && index >= currentCount - 12) {
+                animeList[currentCount - 1]
+            }
             val anime by animeList[sourceIndex]?.collectAsState() ?: return@items
             BrowseAnimeSourceComfortableGridItem(
                 anime = anime,
