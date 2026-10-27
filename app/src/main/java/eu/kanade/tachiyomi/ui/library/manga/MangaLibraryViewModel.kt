@@ -454,19 +454,24 @@ class MangaLibraryViewModel(
             getLibraryItemPreferencesFlow(),
             downloadCache.changes,
         ) { libraryMangaList, prefs, _ ->
+            val downloadCounts = HashMap<Long, Int>()
             libraryMangaList
                 .map { libraryManga ->
-                    // Display mode based on user preference: take it from global library setting or category
+                    val manga = libraryManga.manga
+                    val downloaded = downloadCounts.getOrPut(manga.id) {
+                        downloadManager.getDownloadCount(manga)
+                    }
+                    val source = sourceManager.getOrStub(manga.source)
                     MangaLibraryItem(
                         libraryManga = libraryManga,
-                        downloadCount = downloadManager.getDownloadCount(libraryManga.manga),
+                        downloadCount = downloaded,
                         unreadCount = libraryManga.unreadCount,
                         isLocal = libraryManga.manga.isLocal(),
-                        sourceName = sourceManager.getOrStub(libraryManga.manga.source).name.lowercase(),
-                        sourceLanguage = sourceManager.getOrStub(libraryManga.manga.source).lang,
+                        sourceName = source.name.lowercase(),
+                        sourceLanguage = source.lang,
                         badges = MangaLibraryItem.Badges(
                             downloadCount = if (prefs.downloadBadge) {
-                                downloadManager.getDownloadCount(libraryManga.manga)
+                                downloaded
                             } else {
                                 0
                             },
@@ -481,7 +486,7 @@ class MangaLibraryViewModel(
                                 false
                             },
                             sourceLanguage = if (prefs.languageBadge) {
-                                sourceManager.getOrStub(libraryManga.manga.source).lang
+                                source.lang
                             } else {
                                 ""
                             },
