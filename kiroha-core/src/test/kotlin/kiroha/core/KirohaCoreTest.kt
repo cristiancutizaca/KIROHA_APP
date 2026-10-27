@@ -106,6 +106,12 @@ class KirohaCoreTest {
     }
 
     @Test
+    fun `search results with two dated entries and many undated entries are still sorted`() {
+        val titles = listOf("A 2021", "Unknown A", "B 2026", "Unknown B", "Unknown C")
+        assertEquals(listOf(2, 0, 1, 3, 4), BrowseChronology.newestFirstIndices(titles))
+    }
+
+    @Test
     fun `chronological browsing retains tie order and undated entries`() {
         val titles = listOf("A 2024", "Undated", "B 2026", "C 2026", "D 2022")
         assertEquals(listOf(2, 3, 0, 4, 1), BrowseChronology.newestFirstIndices(titles))
