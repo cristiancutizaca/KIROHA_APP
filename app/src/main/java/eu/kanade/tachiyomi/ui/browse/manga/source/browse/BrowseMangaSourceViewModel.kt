@@ -30,6 +30,10 @@ import eu.kanade.tachiyomi.data.cache.MangaCoverCache
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +42,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -124,6 +129,12 @@ class BrowseMangaSourceViewModel(
     val mangaPagerFlow = state.map { it.listing to it.searchGeneration }
         .distinctUntilChanged()
         .flatMapLatest { (listing, _) ->
+            // Each new search owns its row subscriptions. The previous version
+            // launched one stateIn job per item directly in viewModelScope, so
+            // repeated searches retained thousands of idle jobs until exit.
+            val listingScope = CoroutineScope(
+                viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]),
+            )
             Pager(PagingConfig(pageSize = 25, prefetchDistance = 12, initialLoadSize = 25)) {
                 getRemoteManga.subscribe(sourceId, listing.query ?: "", listing.filters)
             }.flow.map { pagingData ->
@@ -133,11 +144,11 @@ class BrowseMangaSourceViewModel(
                             getManga.subscribe(localManga.url, localManga.source)
                                 .filterNotNull()
                                 // Do not permanently collect a StateFlow for every browsed item.
-                                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), localManga)
+                                .stateIn(listingScope, SharingStarted.WhileSubscribed(5_000), localManga)
                         }
                 }
                     .filter { !hideInLibraryItems || !it.value.favorite }
-            }
+            }.onCompletion { listingScope.cancel() }
         }
         // Cache only the active listing generation; previously each new listing
         // created an independently cached flow retained for the ViewModel lifetime.
