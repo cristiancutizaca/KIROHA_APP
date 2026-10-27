@@ -307,6 +307,9 @@ class MangaDownloader(
      * @param chapters the list of chapters to download.
      * @param autoStart whether to start the downloader after enqueing the chapters.
      */
+    // Multiple taps (or simultaneous library actions) must not race while scanning
+    // SAF folders and persisting the queue. A second call sees the first one's IDs.
+    @Synchronized
     fun queueChapters(manga: Manga, chapters: List<Chapter>, autoStart: Boolean) {
         if (chapters.isEmpty()) return
 
