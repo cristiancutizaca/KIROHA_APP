@@ -74,10 +74,12 @@ class MangaDownloadManager(
     private var activeWorkerId: java.util.UUID? = null
 
     /** Ensure cancellation of a previous worker never stops a replacement worker. */
+    @Synchronized
     fun registerDownloadWorker(workId: java.util.UUID) {
         activeWorkerId = workId
     }
 
+    @Synchronized
     fun stopDownloaderIfOwnedBy(workId: java.util.UUID) {
         if (activeWorkerId == workId && downloader.isRunning) {
             downloader.stop()
