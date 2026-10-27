@@ -449,17 +449,24 @@ class MangaLibraryViewModel(
      * Get the categories and all its manga from the database.
      */
     private fun getLibraryFlow(): Flow<MangaLibraryMap> {
+        // Reuse verified disk counters while read progress changes. A chapter/
+        // episode being marked read updates the database, not download files;
+        // rescanning every download on each read made large libraries freeze.
+        val downloadCountCache = java.util.concurrent.ConcurrentHashMap<Pair<Long, String>, Int>()
+
         val libraryMangasFlow = combine(
             getLibraryManga.subscribe(),
             getLibraryItemPreferencesFlow(),
-            downloadCache.changes,
+            downloadCache.changes.onEach { downloadCountCache.clear() },
         ) { libraryMangaList, prefs, _ ->
             val downloadCounts = HashMap<Long, Int>()
             libraryMangaList
                 .map { libraryManga ->
                     val manga = libraryManga.manga
                     val downloaded = downloadCounts.getOrPut(manga.id) {
-                        downloadManager.getDownloadCount(manga)
+                        downloadCountCache.getOrPut(manga.id to manga.title) {
+                            downloadManager.getDownloadCount(manga)
+                        }
                     }
                     val source = sourceManager.getOrStub(manga.source)
                     MangaLibraryItem(
