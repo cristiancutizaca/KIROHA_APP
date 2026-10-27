@@ -1099,9 +1099,16 @@ class MangaViewModel(
      * Downloads the given list of chapters with the manager.
      * @param chapters the list of chapters to download.
      */
-    private fun downloadChapters(chapters: List<Chapter>) {
+    private suspend fun downloadChapters(chapters: List<Chapter>) {
         val manga = successState?.manga ?: return
-        downloadManager.downloadChapters(manga, chapters)
+        // SAF directory checks and synchronous queue persistence can take seconds.
+        // Never do them on the UI thread: the first tap must not freeze or get lost.
+        withIOContext {
+            // A newly opened screen can be used before the saved queue is restored.
+            // Wait to avoid racing restoration or treating pending chapters as new.
+            downloadManager.awaitQueueRestoration()
+            downloadManager.downloadChapters(manga, chapters)
+        }
         toggleAllSelection(false)
     }
 

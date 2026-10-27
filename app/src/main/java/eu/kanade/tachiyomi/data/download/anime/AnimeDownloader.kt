@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.core.net.toUri
 import aniyomi.core.common.torrent.TorrentPreferences
 import aniyomi.core.common.torrent.TorrentServerApi
@@ -56,6 +57,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.extension
@@ -69,6 +71,8 @@ import tachiyomi.domain.items.episode.model.Episode
 import tachiyomi.domain.source.anime.service.AnimeSourceManager
 import tachiyomi.i18n.aniyomi.AYMR
 import java.io.File
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -617,6 +621,12 @@ class AnimeDownloader(
         }
 
         var duration = 0L
+        // FFmpeg can hang on a dead video host without ever reporting an error.
+        // Observe actual output advances, not the rounded percentage (a large
+        // episode can transfer megabytes without changing its percent).
+        val lastAdvanceAt = AtomicLong(SystemClock.elapsedRealtime())
+        val lastOutputBytes = AtomicLong(0L)
+        val lastOutputTime = AtomicLong(0L)
 
         val logCallback = LogCallback { log ->
             if (log.level <= Level.AV_LOG_WARNING) {
@@ -627,52 +637,84 @@ class AnimeDownloader(
         }
 
         val statCallback = StatisticsCallback { s ->
-            val outTime = (s.time / 1000.0).toLong()
+            val size = s.size
+            val time = s.time.toLong()
+            if (size > lastOutputBytes.get() || time > lastOutputTime.get()) {
+                lastOutputBytes.updateAndGet { previous -> maxOf(previous, size) }
+                lastOutputTime.updateAndGet { previous -> maxOf(previous, time) }
+                lastAdvanceAt.set(SystemClock.elapsedRealtime())
+            }
 
+            val outTime = (s.time / 1000.0).toLong()
             if (duration != 0L && outTime > 0) {
-                download.progress = (100 * outTime / duration).toInt()
+                download.progress = (100 * outTime / duration).toInt().coerceIn(0, 99)
             }
         }
 
-        // Duration probing is only used for displaying progress. Some hosters
-        // reject ffprobe even when FFmpeg can download the stream successfully.
+        // Probing is optional and must not block the actual episode download.
+        // Some streaming providers never finish remote ffprobe requests.
         duration = try {
-            getDuration(ffprobeCommand(video.videoUrl, headerOptions))?.toLong() ?: 0L
+            withTimeoutOrNull(VIDEO_PROBE_TIMEOUT_MS) {
+                getDuration(ffprobeCommand(video.videoUrl, headerOptions))?.toLong()
+            } ?: 0L
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             0L
         }
 
-        suspendCancellableCoroutine { continuation ->
-            val session = FFmpegKit.executeWithArgumentsAsync(
-                ffmpegOptions,
-                {
-                    if (it.returnCode.isValueSuccess) {
-                        if (localTmpFile != null && isSaf) {
-                            localTmpFile.inputStream().buffered().use { input ->
-                                videoFile.openOutputStream().buffered().use { output ->
-                                    input.copyTo(output)
-                                }
+        try {
+            suspendCancellableCoroutine<Unit> { continuation ->
+                val session = FFmpegKit.executeWithArgumentsAsync(
+                    ffmpegOptions,
+                    { result ->
+                        if (continuation.isActive) {
+                            if (result.returnCode?.isValueSuccess == true) {
+                                continuation.resume(Unit)
+                            } else {
+                                continuation.resumeWithException(IOException("Video stream failed in FFmpeg"))
                             }
-                            localTmpFile.delete()
                         }
-                        tmpDir.findFile("$filename.tmp")?.apply {
-                            renameTo("$filename.mkv")
+                    },
+                    logCallback,
+                    statCallback,
+                )
+                // A stuck stream is cancelled, then retried by downloadVideo().
+                // This is a stall timeout, not a maximum episode duration.
+                val watchdog = scope.launchIO {
+                    while (continuation.isActive) {
+                        delay(VIDEO_STALL_POLL_MS)
+                        if (SystemClock.elapsedRealtime() - lastAdvanceAt.get() > VIDEO_STALL_TIMEOUT_MS) {
+                            session.cancel()
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(
+                                    IOException("The anime video source stopped transferring data"),
+                                )
+                            }
+                            break
                         }
-                        continuation.resume(it)
-                    } else {
-                        localTmpFile?.delete()
-                        continuation.resumeWithException(Exception("Error in ffmpeg!"))
                     }
-                },
-                logCallback,
-                statCallback,
-            )
-            continuation.invokeOnCancellation {
-                session.cancel()
-                localTmpFile?.delete()
+                }
+                continuation.invokeOnCancellation {
+                    watchdog.cancel()
+                    session.cancel()
+                }
             }
+
+            // Perform slow SAF copies outside the native FFmpeg callback so the
+            // callback thread cannot block for minutes on Android storage.
+            if (localTmpFile != null && isSaf) {
+                localTmpFile.inputStream().buffered().use { input ->
+                    videoFile.openOutputStream().buffered().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+            tmpDir.findFile("$filename.tmp")?.apply {
+                renameTo("$filename.mkv")
+            }
+        } finally {
+            localTmpFile?.delete()
         }
     }
 
@@ -712,7 +754,9 @@ class AnimeDownloader(
 
         val videoInput = buildList {
             if (video.videoUrl.startsWith("http")) {
-                add("-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2")
+                // A recorded episode has a real EOF: reconnect_at_eof=1 would
+                // loop indefinitely on complete MP4 files and some HLS segments.
+                add("-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2")
                 add(headerOptions)
             }
             add(sourceStreamOptions)
@@ -992,6 +1036,10 @@ class AnimeDownloader(
     }
 
     companion object {
+        private const val VIDEO_PROBE_TIMEOUT_MS = 15_000L
+        private const val VIDEO_STALL_TIMEOUT_MS = 180_000L
+        private const val VIDEO_STALL_POLL_MS = 15_000L
+
         const val TMP_DIR_SUFFIX = "_tmp"
         const val WARNING_NOTIF_TIMEOUT_MS = 30_000L
         const val EPISODES_PER_SOURCE_QUEUE_WARNING_THRESHOLD = 10

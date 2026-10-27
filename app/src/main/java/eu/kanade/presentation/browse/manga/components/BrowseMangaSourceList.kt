@@ -30,6 +30,9 @@ fun BrowseMangaSourceList(
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
 ) {
+    // Older LazyColumn positions may be queried as the new search replaces paging data.
+    val keySnapshot = mangaList.itemSnapshotList
+    val snapshotCount = keySnapshot.size
     val sourceListState = rememberLazyListState()
     BoxWithConstraints {
         val density = LocalDensity.current
@@ -46,19 +49,20 @@ fun BrowseMangaSourceList(
             }
 
             items(
-                count = mangaList.itemCount,
+                count = snapshotCount,
                 key = { index ->
                     val sourceIndex = displayOrder?.getOrNull(index) ?: index
-                    mangaList.peek(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
+                    keySnapshot.getOrNull(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
                         ?: "manga-placeholder-$sourceIndex"
                 },
             ) { index ->
-                // When visual items are reordered, prefetch must still touch
-                // the paging tail, regardless of its visual position.
-                if (displayOrder != null && index >= mangaList.itemCount - 12 && mangaList.itemCount > 0) {
-                    mangaList[mangaList.itemCount - 1]
-                }
                 val sourceIndex = displayOrder?.getOrNull(index) ?: index
+                val currentCount = mangaList.itemCount
+                if (sourceIndex !in 0 until currentCount) return@items
+                // Ordered browsing must still prefetch the paging tail.
+                if (displayOrder != null && index >= currentCount - 12) {
+                    mangaList[currentCount - 1]
+                }
                 val manga by mangaList[sourceIndex]?.collectAsState() ?: return@items
                 BrowseMangaSourceListItem(
                     manga = manga,
