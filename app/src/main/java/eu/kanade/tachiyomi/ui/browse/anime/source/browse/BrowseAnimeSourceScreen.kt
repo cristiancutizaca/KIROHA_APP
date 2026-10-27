@@ -26,6 +26,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -281,41 +282,45 @@ data class BrowseAnimeSourceScreen(
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { paddingValues ->
-            BrowseAnimeSourceContent(
-                source = viewModel.source,
-                animeList = viewModel.animePagerFlow.collectAsLazyPagingItems(),
-                columns = viewModel.getColumnsPreference(LocalConfiguration.current.orientation),
-                entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
-                topBarHeight = topBarHeight,
-                displayMode = viewModel.displayMode,
-                orderChronologically = state.listing == Listing.Latest || state.listing is Listing.Search,
-                snackbarHostState = snackbarHostState,
-                contentPadding = paddingValues,
-                onWebViewClick = onWebViewClick,
-                onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
-                onLocalAnimeSourceHelpClick = onHelpClick,
-                onAnimeClick = { navigator.push((AnimeScreen(it.id, true))) },
-                onAnimeLongClick = { anime ->
-                    scope.launchIO {
-                        val duplicateAnime = viewModel.getDuplicateAnimelibAnime(anime)
-                        when {
-                            anime.favorite -> viewModel.setDialog(
-                                BrowseAnimeSourceViewModel.Dialog.RemoveAnime(anime),
-                            )
-
-                            duplicateAnime != null -> viewModel.setDialog(
-                                BrowseAnimeSourceViewModel.Dialog.AddDuplicateAnime(
-                                    anime,
-                                    duplicateAnime,
-                                ),
-                            )
-
-                            else -> viewModel.addFavorite(anime)
+            // Reset the Lazy layout's scroll position when a new search/listing is opened.
+            // Retaining an old index after Paging replaces 60 items with 25 can crash.
+            key(state.listing, state.searchGeneration) {
+                BrowseAnimeSourceContent(
+                    source = viewModel.source,
+                    animeList = viewModel.animePagerFlow.collectAsLazyPagingItems(),
+                    columns = viewModel.getColumnsPreference(LocalConfiguration.current.orientation),
+                    entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
+                    topBarHeight = topBarHeight,
+                    displayMode = viewModel.displayMode,
+                    orderChronologically = state.listing == Listing.Latest || state.listing is Listing.Search,
+                    snackbarHostState = snackbarHostState,
+                    contentPadding = paddingValues,
+                    onWebViewClick = onWebViewClick,
+                    onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
+                    onLocalAnimeSourceHelpClick = onHelpClick,
+                    onAnimeClick = { navigator.push((AnimeScreen(it.id, true))) },
+                    onAnimeLongClick = { anime ->
+                        scope.launchIO {
+                            val duplicateAnime = viewModel.getDuplicateAnimelibAnime(anime)
+                            when {
+                                anime.favorite -> viewModel.setDialog(
+                                    BrowseAnimeSourceViewModel.Dialog.RemoveAnime(anime),
+                                )
+    
+                                duplicateAnime != null -> viewModel.setDialog(
+                                    BrowseAnimeSourceViewModel.Dialog.AddDuplicateAnime(
+                                        anime,
+                                        duplicateAnime,
+                                    ),
+                                )
+    
+                                else -> viewModel.addFavorite(anime)
+                            }
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
 
         val onDismissRequest = { viewModel.setDialog(null) }
