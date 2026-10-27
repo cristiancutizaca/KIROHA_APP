@@ -323,7 +323,8 @@ class AnimeDownloader(
 
             // Also restart an idle queue (e.g. after individual episode errors).
             // A queue containing old ERROR entries must not block newly enqueued work.
-            if (autoStart && !isRunning) {
+            // A manually paused queue stays paused when new episodes are added.
+            if (autoStart && !isRunning && !isPaused) {
                 val queuedDownloads =
                     queueState.value.count { it: AnimeDownload -> it.source !is UnmeteredSource }
                 val maxDownloadsFromSource = queueState.value
