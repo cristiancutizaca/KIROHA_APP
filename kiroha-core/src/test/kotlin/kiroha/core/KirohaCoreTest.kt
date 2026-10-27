@@ -112,6 +112,17 @@ class KirohaCoreTest {
     }
 
     @Test
+    fun `partially loaded chronological search reorders without touching placeholders`() {
+        val order = BrowseChronology.loadedWindowIndices(
+            totalCount = 7,
+            placeholdersBefore = 2,
+            loadedTitles = listOf("Series 2021", "Series 2026", "Series 2025"),
+        )
+        assertEquals(listOf(0, 1, 3, 4, 2, 5, 6), order)
+        assertNull(BrowseChronology.loadedWindowIndices(3, 0, listOf("Undated", "A 2026")))
+    }
+
+    @Test
     fun `chronological browsing retains tie order and undated entries`() {
         val titles = listOf("A 2024", "Undated", "B 2026", "C 2026", "D 2022")
         assertEquals(listOf(2, 3, 0, 4, 1), BrowseChronology.newestFirstIndices(titles))
