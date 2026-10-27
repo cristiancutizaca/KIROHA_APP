@@ -79,14 +79,26 @@ class AnimeDownloadManager(
     /**
      * Tells the downloader to begin downloads.
      */
+    @Volatile
+    private var activeWorkerId: java.util.UUID? = null
+
+    /** Ensure cancellation of a previous worker never stops a replacement worker. */
+    fun registerDownloadWorker(workId: java.util.UUID) {
+        activeWorkerId = workId
+    }
+
+    fun stopDownloaderIfOwnedBy(workId: java.util.UUID) {
+        if (activeWorkerId == workId && downloader.isRunning) {
+            downloader.stop()
+        }
+    }
+
     fun startDownloads() {
         if (downloader.isRunning) return
 
-        if (AnimeDownloadJob.isRunning(context)) {
-            downloader.start()
-        } else {
-            AnimeDownloadJob.start(context)
-        }
+        // Replace a worker that is still transitioning to CANCELLED after Pause.
+        // KEEP would drop this request, leaving the Start button apparently dead.
+        AnimeDownloadJob.start(context, replaceExisting = true)
     }
 
     /**
