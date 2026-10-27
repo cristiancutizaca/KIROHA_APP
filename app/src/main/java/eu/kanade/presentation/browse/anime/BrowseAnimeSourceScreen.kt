@@ -59,8 +59,12 @@ fun BrowseAnimeSourceContent(
 
     val snapshot = animeList.itemSnapshotList
     val displayOrder = remember(snapshot, orderChronologically, animeList.itemCount) {
-        if (orderChronologically && snapshot.items.size == animeList.itemCount) {
-            BrowseChronology.newestFirstIndices(snapshot.items.map { it.value.title })
+        if (orderChronologically) {
+            BrowseChronology.loadedWindowIndices(
+                totalCount = animeList.itemCount,
+                placeholdersBefore = snapshot.placeholdersBefore,
+                loadedTitles = snapshot.items.map { it.value.title },
+            )
         } else {
             null
         }
