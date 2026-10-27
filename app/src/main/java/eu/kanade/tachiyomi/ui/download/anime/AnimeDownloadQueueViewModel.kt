@@ -199,7 +199,10 @@ class AnimeDownloadQueueViewModel(
                 onUpdateDownloadedPages(download)
             }
 
-            AnimeDownload.State.ERROR -> cancelProgressJob(download)
+            AnimeDownload.State.ERROR -> {
+                cancelProgressJob(download)
+                onUpdateProgress(download)
+            }
 
             else -> {
                 /* unused */
