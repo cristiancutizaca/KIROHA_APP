@@ -45,7 +45,7 @@ class AnimeDownloadHolder(private val view: View, val adapter: AnimeDownloadAdap
 
         // Update the progress bar and the number of downloaded pages
         val video = download.video
-        if (video == null) {
+        if (video == null && download.status != AnimeDownload.State.ERROR) {
             binding.downloadProgress.progress = 0
             binding.downloadProgress.max = 1
             binding.downloadProgressText.text = ""
@@ -63,6 +63,13 @@ class AnimeDownloadHolder(private val view: View, val adapter: AnimeDownloadAdap
         if (binding.downloadProgress.max == 1) {
             binding.downloadProgress.max = 100
         }
+        // An interrupted/failed episode is not 100% downloaded even when
+        // its network stream previously reached 100% before file finalization.
+        if (download.status == AnimeDownload.State.ERROR) {
+            binding.downloadProgress.isIndeterminate = false
+            binding.downloadProgress.setProgressCompat(0, false)
+            return
+        }
         if (download.progress == 0) {
             binding.downloadProgress.isIndeterminate = true
         } else {
@@ -75,7 +82,9 @@ class AnimeDownloadHolder(private val view: View, val adapter: AnimeDownloadAdap
      * Updates the text field of the number of downloaded pages.
      */
     fun notifyDownloadedPages() {
-        binding.downloadProgressText.text = if (download.progress == 0) {
+        binding.downloadProgressText.text = if (download.status == AnimeDownload.State.ERROR) {
+            view.context.stringResource(MR.strings.download_notifier_title_error)
+        } else if (download.progress == 0) {
             view.context.stringResource(AYMR.strings.downloading)
         } else {
             view.context.stringResource(AYMR.strings.episode_download_progress, download.progress)
