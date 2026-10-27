@@ -26,6 +26,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -233,41 +234,45 @@ data class BrowseMangaSourceScreen(
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { paddingValues ->
-            BrowseSourceContent(
-                source = viewModel.source,
-                mangaList = viewModel.mangaPagerFlow.collectAsLazyPagingItems(),
-                columns = viewModel.getColumnsPreference(LocalConfiguration.current.orientation),
-                entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
-                topBarHeight = topBarHeight,
-                displayMode = viewModel.displayMode,
-                orderChronologically = state.listing == Listing.Latest || state.listing is Listing.Search,
-                snackbarHostState = snackbarHostState,
-                contentPadding = paddingValues,
-                onWebViewClick = onWebViewClick,
-                onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
-                onLocalSourceHelpClick = onHelpClick,
-                onMangaClick = { navigator.push((MangaScreen(it.id, true))) },
-                onMangaLongClick = { manga ->
-                    scope.launchIO {
-                        val duplicateManga = viewModel.getDuplicateLibraryManga(manga)
-                        when {
-                            manga.favorite -> viewModel.setDialog(
-                                BrowseMangaSourceViewModel.Dialog.RemoveManga(manga),
-                            )
-
-                            duplicateManga != null -> viewModel.setDialog(
-                                BrowseMangaSourceViewModel.Dialog.AddDuplicateManga(
-                                    manga,
-                                    duplicateManga,
-                                ),
-                            )
-
-                            else -> viewModel.addFavorite(manga)
+            // Reset the Lazy layout's scroll position when a new search/listing is opened.
+            // Retaining an old index after Paging replaces 60 items with 25 can crash.
+            key(state.listing, state.searchGeneration) {
+                BrowseSourceContent(
+                    source = viewModel.source,
+                    mangaList = viewModel.mangaPagerFlow.collectAsLazyPagingItems(),
+                    columns = viewModel.getColumnsPreference(LocalConfiguration.current.orientation),
+                    entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
+                    topBarHeight = topBarHeight,
+                    displayMode = viewModel.displayMode,
+                    orderChronologically = state.listing == Listing.Latest || state.listing is Listing.Search,
+                    snackbarHostState = snackbarHostState,
+                    contentPadding = paddingValues,
+                    onWebViewClick = onWebViewClick,
+                    onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
+                    onLocalSourceHelpClick = onHelpClick,
+                    onMangaClick = { navigator.push((MangaScreen(it.id, true))) },
+                    onMangaLongClick = { manga ->
+                        scope.launchIO {
+                            val duplicateManga = viewModel.getDuplicateLibraryManga(manga)
+                            when {
+                                manga.favorite -> viewModel.setDialog(
+                                    BrowseMangaSourceViewModel.Dialog.RemoveManga(manga),
+                                )
+    
+                                duplicateManga != null -> viewModel.setDialog(
+                                    BrowseMangaSourceViewModel.Dialog.AddDuplicateManga(
+                                        manga,
+                                        duplicateManga,
+                                    ),
+                                )
+    
+                                else -> viewModel.addFavorite(manga)
+                            }
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
 
         val onDismissRequest = { viewModel.setDialog(null) }
