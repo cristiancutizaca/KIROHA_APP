@@ -93,7 +93,10 @@ class AnimeDownloadManager(
      * Tells the downloader to pause downloads.
      */
     fun pauseDownloads() {
-        downloader.stop()
+        // Explicit pause must preserve the queue and the paused preference.
+        // stop() marks in-flight entries as ERROR and (for manga) clears isPaused.
+        downloader.pause()
+        AnimeDownloadJob.stop(context)
     }
 
     /**
