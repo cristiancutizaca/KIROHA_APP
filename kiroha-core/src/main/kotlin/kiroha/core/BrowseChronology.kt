@@ -7,6 +7,33 @@ package kiroha.core
 object BrowseChronology {
     private val yearPattern = Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)""")
 
+    /**
+     * Reorder only the window Paging has loaded. Placeholder positions keep
+     * their indexes, so date ordering can work before an entire listing loads.
+     * Results may move as further pages arrive; sources must provide actual
+     * publication dates to guarantee a global chronological ordering.
+     */
+    fun loadedWindowIndices(
+        totalCount: Int,
+        placeholdersBefore: Int,
+        loadedTitles: List<String>,
+    ): List<Int>? {
+        if (totalCount <= 1 || placeholdersBefore < 0 ||
+            placeholdersBefore > totalCount ||
+            loadedTitles.size > totalCount - placeholdersBefore
+        ) return null
+
+        val order = newestFirstIndices(loadedTitles) ?: return null
+        val end = placeholdersBefore + loadedTitles.size
+        return List(totalCount) { index ->
+            if (index >= placeholdersBefore && index < end) {
+                placeholdersBefore + order[index - placeholdersBefore]
+            } else {
+                index
+            }
+        }
+    }
+
     fun yearInTitle(title: String): Int? =
         yearPattern.findAll(title).lastOrNull()?.value?.toIntOrNull()
 
