@@ -251,18 +251,22 @@ class MangaDownloader(
 
             // Use supervisorScope to cancel child jobs when the downloader job is cancelled
             supervisorScope {
-                val downloadJobs = mutableMapOf<MangaDownload, Job>()
+                // MangaDownload mutates its pages/status during downloading.
+                // Never use it as a HashMap key, or repeated pause/resume can
+                // launch the same chapter again when the key's hash changes.
+                val downloadJobs = mutableMapOf<Long, Job>()
 
                 activeDownloadsFlow.collectLatest { activeDownloads ->
-                    val downloadJobsToStop = downloadJobs.filter { it.key !in activeDownloads }
-                    downloadJobsToStop.forEach { (download, job) ->
+                    val activeChapterIds = activeDownloads.mapTo(hashSetOf()) { it.chapter.id }
+                    val jobsToStop = downloadJobs.filterKeys { it !in activeChapterIds }
+                    jobsToStop.forEach { (chapterId, job) ->
                         job.cancel()
-                        downloadJobs.remove(download)
+                        downloadJobs.remove(chapterId)
                     }
 
-                    val downloadsToStart = activeDownloads.filter { it !in downloadJobs }
+                    val downloadsToStart = activeDownloads.filter { it.chapter.id !in downloadJobs }
                     downloadsToStart.forEach { download ->
-                        downloadJobs[download] = launchDownloadJob(download)
+                        downloadJobs[download.chapter.id] = launchDownloadJob(download)
                     }
                 }
             }
