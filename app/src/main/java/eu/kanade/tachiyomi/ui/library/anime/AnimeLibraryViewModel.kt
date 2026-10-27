@@ -461,17 +461,24 @@ class AnimeLibraryViewModel(
      * Get the categories and all its anime from the database.
      */
     private fun getLibraryFlow(): Flow<AnimeLibraryMap> {
+        // Reuse verified disk counters while read progress changes. A chapter/
+        // episode being marked read updates the database, not download files;
+        // rescanning every download on each read made large libraries freeze.
+        val downloadCountCache = java.util.concurrent.ConcurrentHashMap<Pair<Long, String>, Int>()
+
         val animelibAnimesFlow = combine<List<LibraryAnime>, ItemPreferences, Unit, Map<Long, List<AnimeLibraryItem>>>(
             getLibraryAnime.subscribe(),
             getAnimelibItemPreferencesFlow(),
-            downloadCache.changes,
+            downloadCache.changes.onEach { downloadCountCache.clear() },
         ) { animelibAnimeList, prefs, _ ->
             val downloadCounts = HashMap<Long, Int>()
             animelibAnimeList
                 .map { animelibAnime ->
                     val anime = animelibAnime.anime
                     val downloaded = downloadCounts.getOrPut(anime.id) {
-                        downloadManager.getDownloadCount(anime)
+                        downloadCountCache.getOrPut(anime.id to anime.title) {
+                            downloadManager.getDownloadCount(anime)
+                        }
                     }
                     AnimeLibraryItem(
                         libraryAnime = animelibAnime,
