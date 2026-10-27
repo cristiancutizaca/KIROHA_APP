@@ -81,8 +81,10 @@ class MangaDownloadManager(
     }
 
     fun pauseDownloads() {
+        // Explicit pause must preserve the queue and the paused preference.
+        // stop() marks in-flight entries as ERROR and (for manga) clears isPaused.
         downloader.pause()
-        downloader.stop()
+        MangaDownloadJob.stop(context)
     }
 
     fun clearQueue() {
