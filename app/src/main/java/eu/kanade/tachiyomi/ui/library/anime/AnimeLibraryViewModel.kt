@@ -277,12 +277,18 @@ class AnimeLibraryViewModel(
             }
         }
 
+        // Compute tracker IDs once per library refresh. Rebuilding this map for
+        // every entry caused quadratic filtering time with large libraries.
+        val trackerIdsByEntry = if (isNotLoggedInAnyTrack || trackFiltersIsIgnored) {
+            emptyMap()
+        } else {
+            trackMap.mapValues { (_, tracks) -> tracks.map { it.trackerId } }
+        }
+
         val filterFnTracking: (AnimeLibraryItem) -> Boolean = tracking@{ item ->
             if (isNotLoggedInAnyTrack || trackFiltersIsIgnored) return@tracking true
 
-            val animeTracks = trackMap
-                .mapValues { entry -> entry.value.map { it.trackerId } }[item.libraryAnime.id]
-                .orEmpty()
+            val animeTracks = trackerIdsByEntry[item.libraryAnime.id].orEmpty()
 
             val isExcluded = excludedTracks.isNotEmpty() && animeTracks.fastAny { it in excludedTracks }
             val isIncluded = includedTracks.isEmpty() || animeTracks.fastAny { it in includedTracks }
