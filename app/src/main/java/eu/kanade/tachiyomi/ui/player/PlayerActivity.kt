@@ -298,13 +298,9 @@ class PlayerActivity : BaseActivity() {
         setupMediaSession()
         setupPlayerOrientation()
 
-        Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
-            runOnUiThread {
-                toast(throwable.message)
-            }
-            logcat(LogPriority.ERROR, throwable)
-            finish()
-        }
+        // GlobalExceptionHandler is installed by App for the entire process.
+        // Do not replace it from an Activity: doing so swallows crashes from
+        // unrelated screens (including extension searches) and leaks this Activity.
 
         viewModel.eventFlow
             .onEach { event ->
