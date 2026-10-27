@@ -466,17 +466,21 @@ class AnimeLibraryViewModel(
             getAnimelibItemPreferencesFlow(),
             downloadCache.changes,
         ) { animelibAnimeList, prefs, _ ->
+            val downloadCounts = HashMap<Long, Int>()
             animelibAnimeList
                 .map { animelibAnime ->
-                    // Display mode based on user preference: take it from global library setting or category
+                    val anime = animelibAnime.anime
+                    val downloaded = downloadCounts.getOrPut(anime.id) {
+                        downloadManager.getDownloadCount(anime)
+                    }
                     AnimeLibraryItem(
                         libraryAnime = animelibAnime,
-                        downloadCount = downloadManager.getDownloadCount(animelibAnime.anime),
+                        downloadCount = downloaded,
                         unseenCount = animelibAnime.unseenCount,
                         isLocal = animelibAnime.anime.isLocal(),
                         badges = AnimeLibraryItem.Badges(
                             downloadCount = if (prefs.downloadBadge) {
-                                downloadManager.getDownloadCount(animelibAnime.anime)
+                                downloaded
                             } else {
                                 0
                             },
