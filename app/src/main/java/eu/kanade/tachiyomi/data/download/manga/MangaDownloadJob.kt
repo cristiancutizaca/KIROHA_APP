@@ -75,6 +75,7 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
         if (!networkCheck) {
             return if (downloadManager.queueState.value.isNotEmpty()) Result.retry() else Result.success()
         }
+        downloadManager.registerDownloadWorker(id)
         if (!downloadManager.downloaderStart()) return Result.success()
 
         setForegroundSafely()
@@ -100,8 +101,8 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
                 }
             } finally {
                 networkMonitor.cancel()
-                if (isStopped && downloadManager.isRunning) {
-                    downloadManager.downloaderStop()
+                if (isStopped) {
+                    downloadManager.stopDownloaderIfOwnedBy(id)
                 }
             }
         }
@@ -125,13 +126,17 @@ class MangaDownloadJob(context: Context, workerParams: WorkerParameters) : Corou
     companion object {
         private const val TAG = "MangaDownloader"
 
-        fun start(context: Context) {
+        fun start(context: Context, replaceExisting: Boolean = false) {
             val request = OneTimeWorkRequestBuilder<MangaDownloadJob>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .addTag(TAG)
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniqueWork(TAG, ExistingWorkPolicy.KEEP, request)
+                .enqueueUniqueWork(
+                    TAG,
+                    if (replaceExisting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                    request,
+                )
         }
 
         fun stop(context: Context) {
