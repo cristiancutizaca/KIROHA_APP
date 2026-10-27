@@ -114,6 +114,8 @@ class MangaDownloadManager(
         // DB lookups are suspending. Blocking the UI until they complete can
         // freeze the chapter screen, especially on slower storage.
         scope.launchIO {
+            // Long-press can race the saved queue's startup restoration, too.
+            downloader.awaitRestoration()
             val toAdd = getQueuedDownloadOrNull(chapterId)
                 ?: downloadFromChapterId(chapterId)
                 ?: return@launchIO
