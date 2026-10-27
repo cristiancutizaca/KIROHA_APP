@@ -58,8 +58,12 @@ fun BrowseSourceContent(
 
     val snapshot = mangaList.itemSnapshotList
     val displayOrder = remember(snapshot, orderChronologically, mangaList.itemCount) {
-        if (orderChronologically && snapshot.items.size == mangaList.itemCount) {
-            BrowseChronology.newestFirstIndices(snapshot.items.map { it.value.title })
+        if (orderChronologically) {
+            BrowseChronology.loadedWindowIndices(
+                totalCount = mangaList.itemCount,
+                placeholdersBefore = snapshot.placeholdersBefore,
+                loadedTitles = snapshot.items.map { it.value.title },
+            )
         } else {
             null
         }
