@@ -159,9 +159,15 @@ object SettingsDataScreen : SearchableSettings {
                     context.toast(MR.strings.file_picker_uri_permission_unsupported)
                 }
 
-                UniFile.fromUri(context, uri)?.let {
-                    storageDirPref.set(it.uri.toString())
-                    SafStorageRegistry.register(context, uri, it.name ?: "SD card")
+                // Only replace the saved location after confirming that Android
+                // actually granted writable access. A stale/denied SAF URI must
+                // never overwrite a previously working download location.
+                val selected = runCatching { UniFile.fromUri(context, uri) }.getOrNull()
+                if (selected?.exists() == true && selected.isDirectory && selected.canWrite()) {
+                    storageDirPref.set(selected.uri.toString())
+                    SafStorageRegistry.register(context, uri, selected.name ?: "SD card")
+                } else {
+                    context.toast(context.stringResource(MR.strings.invalid_location, uri.toString()))
                 }
             }
         }
@@ -179,8 +185,10 @@ object SettingsDataScreen : SearchableSettings {
         }
 
         return remember(storageDir) {
-            val file = UniFile.fromUri(context, storageDir.toUri())
-            file?.displayablePath
+            runCatching { UniFile.fromUri(context, storageDir.toUri()) }
+                .getOrNull()
+                ?.takeIf { it.exists() && it.isDirectory && it.canWrite() }
+                ?.displayablePath
         } ?: stringResource(MR.strings.invalid_location, storageDir)
     }
 
