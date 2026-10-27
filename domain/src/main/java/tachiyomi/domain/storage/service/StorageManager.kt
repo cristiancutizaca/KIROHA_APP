@@ -32,6 +32,7 @@ class StorageManager(
     private val folderProvider: FolderProvider,
 ) {
     private val storageDirPreference = storagePreferences.baseStorageDirectory
+    @Volatile
     private var baseDir: UniFile? = getBaseDir(storageDirPreference.get())
 
     private val _changes: Channel<Unit> = Channel(Channel.UNLIMITED)
@@ -66,8 +67,12 @@ class StorageManager(
     }
 
     private fun getBaseDir(uri: String): UniFile? {
-        return UniFile.fromUri(context, uri.toUri())
-            .takeIf { it?.exists() == true }
+        // The URI may belong to a removed volume or a revoked SAF grant.
+        // Do not let a stale storage preference crash startup.
+        return runCatching {
+            UniFile.fromUri(context, uri.toUri())
+                ?.takeIf { it.exists() && it.isDirectory }
+        }.getOrNull()
     }
 
     fun getAutomaticBackupsDirectory(): UniFile? {
@@ -75,7 +80,22 @@ class StorageManager(
     }
 
     fun getDownloadsDirectory(): UniFile? {
-        return baseDir?.createDirectory(DOWNLOADS_PATH)
+        // Recheck the saved URI on demand when a grant has been revoked and
+        // reselected. The preference itself may not emit if the URI is the same.
+        val root = baseDir ?: getBaseDir(storageDirPreference.get()).also { baseDir = it }
+        return try {
+            if (root == null || !root.canWrite()) {
+                baseDir = null
+                null
+            } else {
+                root.createDirectory(DOWNLOADS_PATH).also {
+                    if (it == null) baseDir = null
+                }
+            }
+        } catch (_: SecurityException) {
+            baseDir = null
+            null
+        }
     }
 
     fun getLocalMangaSourceDirectory(): UniFile? {
