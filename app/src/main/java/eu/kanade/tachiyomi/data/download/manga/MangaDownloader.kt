@@ -459,30 +459,75 @@ class MangaDownloader(
                 }
             notifier.onProgressChange(download)
 
-            // Do after download completes
+            // A full page counter only means the images are ready. Verify the
+            // actual files before finalizing, so 100% never silently becomes ERROR.
             if (!isDownloadSuccessful(download, tmpDir)) {
                 download.status = MangaDownload.State.ERROR
+                notifier.onError(
+                    "Image verification failed after downloading ${download.downloadedImages}" +
+                        "/${download.pages?.size ?: 0} pages. Retry to recover the missing files.",
+                    download.chapter.name,
+                    download.manga.title,
+                    download.manga.id,
+                )
                 return
             }
 
-            createComicInfoFile(
-                tmpDir,
-                download.manga,
-                download.chapter,
-                download.source,
-            )
+            // ComicInfo is optional metadata, not a reason to strand otherwise
+            // complete images at 100% if a tracker/metadata lookup fails.
+            try {
+                createComicInfoFile(
+                    tmpDir,
+                    download.manga,
+                    download.chapter,
+                    download.source,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                logcat(LogPriority.WARN, error) { "Failed to write optional ComicInfo for chapter ${download.chapter.id}" }
+            }
 
-            // Only rename the directory if it's downloaded
+            val finalizeStart = SystemClock.elapsedRealtime()
+            logcat(LogPriority.INFO) {
+                "Finalizing chapter ${download.chapter.id} pages=${download.pages?.size} asCBZ=${downloadPreferences.saveChaptersAsCBZ.get()}"
+            }
+            // Never remove the temporary source directory unless the final file
+            // was committed successfully. A failed SAF rename must remain retryable.
             if (downloadPreferences.saveChaptersAsCBZ.get()) {
                 archiveChapter(mangaDir, chapterDirname, tmpDir)
             } else {
-                tmpDir.renameTo(chapterDirname)
+                check(tmpDir.renameTo(chapterDirname)) {
+                    "Cannot rename completed chapter folder: $chapterDirname"
+                }
             }
-            cache.addChapter(chapterDirname, mangaDir, download.manga)
+            logcat(LogPriority.INFO) {
+                "Chapter ${download.chapter.id} finalized in ${SystemClock.elapsedRealtime() - finalizeStart}ms"
+            }
 
-            DiskUtil.createNoMediaFile(tmpDir, context)
+            // .nomedia belongs to the persistent parent, not the temp folder
+            // (which has just been renamed or deleted).
+            try {
+                DiskUtil.createNoMediaFile(mangaDir, context)
+            } catch (error: Exception) {
+                logcat(LogPriority.WARN, error) { "Unable to create optional .nomedia" }
+            }
 
+            // The on-disk chapter is now committed. The cache can be waiting on a
+            // long library reindex under its mutex; do NOT block removal from the
+            // durable download queue behind that unrelated background work.
             download.status = MangaDownload.State.DOWNLOADED
+            scope.launchIO {
+                try {
+                    cache.addChapter(chapterDirname, mangaDir, download.manga)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    logcat(LogPriority.ERROR, error) {
+                        "Download completed on disk but chapter index update failed: ${download.chapter.id}"
+                    }
+                }
+            }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // If the page list threw, it will resume here
@@ -666,27 +711,36 @@ class MangaDownloader(
         download: MangaDownload,
         tmpDir: UniFile,
     ): Boolean {
-        // Page list hasn't been initialized
-        val downloadPageCount = download.pages?.size ?: return false
-        // Ensure that all pages have been downloaded
-        if (download.downloadedImages != downloadPageCount) {
+        val pages = download.pages ?: return false
+        if (pages.isEmpty() || download.downloadedImages != pages.size) return false
+
+        // File count is not page count: SAF folders may contain stale files,
+        // and a split tall image can yield several files for one logical page.
+        // Checking every expected page avoids rejecting valid n/n galleries.
+        val savedPagePrefixes = tmpDir.listFiles().orEmpty().asSequence()
+            .filter { it.isFile }
+            .mapNotNull { it.name }
+            .filterNot { it.endsWith(".tmp", ignoreCase = true) }
+            .mapNotNull { fileName ->
+                val pagePrefix = fileName.substringBefore('.').substringBefore("__")
+                pagePrefix.takeIf {
+                    it.isNotEmpty() && it.all(Char::isDigit) && isDownloadedPageImage(fileName, it)
+                }
+            }
+            .toSet()
+
+        val digits = pages.size.toString().length.coerceAtLeast(3)
+        val missing = pages.filterNot { page ->
+            "%0${digits}d".format(Locale.ENGLISH, page.number) in savedPagePrefixes
+        }
+        if (missing.isNotEmpty()) {
+            logcat(LogPriority.WARN) {
+                "Chapter ${download.chapter.id} reports ${download.downloadedImages}/${pages.size} pages READY, " +
+                    "but ${missing.size} page files are missing; first=${missing.first().number}"
+            }
             return false
         }
-        // Ensure that the chapter folder has all the pages
-        val downloadedImagesCount = tmpDir.listFiles().orEmpty().count {
-            val fileName = it.name.orEmpty()
-            when {
-                fileName in listOf(COMIC_INFO_FILE, NOMEDIA_FILE) -> false
-
-                fileName.endsWith(".tmp") -> false
-
-                // Only count the first split page and not the others
-                fileName.contains("__") && !fileName.endsWith("__001.jpg") -> false
-
-                else -> true
-            }
-        }
-        return downloadedImagesCount == downloadPageCount
+        return true
     }
 
     /**
@@ -709,13 +763,19 @@ class MangaDownloader(
         dirname: String,
         tmpDir: UniFile,
     ) {
-        val zip = mangaDir.createFile("$dirname.cbz$TMP_DIR_SUFFIX")!!
+        // A previous failed archive is scratch data; keep the original image
+        // folder until a new .cbz is fully written and renamed.
+        mangaDir.findFile("$dirname.cbz$TMP_DIR_SUFFIX")?.delete()
+        val zip = mangaDir.createFile("$dirname.cbz$TMP_DIR_SUFFIX")
+            ?: error("Cannot create temporary CBZ for $dirname")
         ZipWriter(context, zip).use { writer ->
-            tmpDir.listFiles()?.forEach { file ->
-                writer.write(file)
-            }
+            tmpDir.listFiles().orEmpty()
+                .filter { it.isFile && it.name != NOMEDIA_FILE && it.name?.endsWith(".tmp") != true }
+                .forEach(writer::write)
         }
-        zip.renameTo("$dirname.cbz")
+        check(zip.renameTo("$dirname.cbz")) {
+            "Cannot finalize CBZ archive for $dirname"
+        }
         tmpDir.delete()
     }
 
