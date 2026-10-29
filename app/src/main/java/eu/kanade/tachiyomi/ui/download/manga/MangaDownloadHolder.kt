@@ -7,6 +7,8 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.manga.model.MangaDownload
 import eu.kanade.tachiyomi.databinding.DownloadItemBinding
 import eu.kanade.tachiyomi.util.view.popupMenu
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.i18n.aniyomi.AYMR
 
 /**
  * Class used to hold the data of a download.
@@ -69,7 +71,16 @@ class MangaDownloadHolder(private val view: View, val adapter: MangaDownloadAdap
      */
     fun notifyDownloadedPages() {
         val pages = download.pages ?: return
-        binding.downloadProgressText.text = "${download.downloadedImages}/${pages.size}"
+        val pageCounter = "${download.downloadedImages}/${pages.size}"
+        val statusText = when {
+            download.status == MangaDownload.State.ERROR ->
+                view.context.stringResource(AYMR.strings.kiroha_download_failed_to_finalize)
+            download.status == MangaDownload.State.DOWNLOADING &&
+                download.downloadedImages == pages.size ->
+                view.context.stringResource(AYMR.strings.kiroha_download_finalizing)
+            else -> null
+        }
+        binding.downloadProgressText.text = if (statusText == null) pageCounter else "$pageCounter · $statusText"
     }
 
     override fun onItemReleased(position: Int) {
