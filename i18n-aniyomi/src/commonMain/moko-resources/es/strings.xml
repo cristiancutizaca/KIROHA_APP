@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="kiroha_download_finalizing">Guardando…</string>
+    <string name="kiroha_download_failed_to_finalize">Error, reintentar</string>
     <string name="confirm_exit">Presione Atrás nuevamente para salir</string>
     <string name="action_filter_started">Iniciado</string>
     <string name="action_sort_airing_time">Fecha de retransmisión</string>

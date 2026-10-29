@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="kiroha_download_finalizing">Saving…</string>
+    <string name="kiroha_download_failed_to_finalize">Error, retry</string>
     <!-- Generic strings -->
     <string name="confirm_exit">Enable Horizontal Seek</string>
     <string name="action_filter_started">Started</string>
