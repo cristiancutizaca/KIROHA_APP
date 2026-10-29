@@ -292,7 +292,9 @@ data class BrowseAnimeSourceScreen(
                     entries = viewModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
                     topBarHeight = topBarHeight,
                     displayMode = viewModel.displayMode,
-                    orderChronologically = state.listing == Listing.Latest || state.listing is Listing.Search,
+                    // Preserve extension ordering for searches. Year-in-title sorting can reshuffle
+                    // loaded pages and move older results ahead of missing intermediate pages.
+                    orderChronologically = state.listing == Listing.Latest,
                     snackbarHostState = snackbarHostState,
                     contentPadding = paddingValues,
                     onWebViewClick = onWebViewClick,
