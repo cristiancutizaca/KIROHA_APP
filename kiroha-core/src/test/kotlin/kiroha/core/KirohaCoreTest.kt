@@ -92,41 +92,44 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun `e hentai style search keeps latest uploads first regardless of title year`() {
-        // Simulates the gallery ordering already returned by an extension:
-        // upload timestamps are newest-first, but years embedded in titles
-        // describe the work, not the date a gallery was uploaded.
-        data class Gallery(val url: String, val title: String, val uploadedAt: Long)
+    fun `paginated E Hentai chronological results never jump back to newer years`() {
+        // The extension is the source of truth for upload order. If it emits
+        // years descending, Kiroha must never shuffle loaded pages locally.
+        // This covers the reported 2025 -> 2021 -> 2022 -> 2025 regression
+        // without misinterpreting a year mentioned in the title as a timestamp.
+        data class Gallery(val url: String, val title: String, val year: Int)
 
-        val serverPages = listOf(
+        val pages = listOf(
             listOf(
-                Gallery("/g/300", "Dragon Ball (2021)", 300L),
-                Gallery("/g/299", "Dragon Ball (2026)", 299L),
+                Gallery("/g/6", "Dragon Ball 2026", 2026),
+                Gallery("/g/5", "Dragon Ball 2025", 2025),
             ),
             listOf(
-                Gallery("/g/299", "Dragon Ball (2026)", 299L),
-                Gallery("/g/298", "Dragon Ball (2019)", 298L),
-                Gallery("/g/297", "Dragon Ball (2025)", 297L),
+                Gallery("/g/5", "Dragon Ball 2025", 2025),
+                Gallery("/g/4", "Dragon Ball 2024", 2024),
+                Gallery("/g/3", "Dragon Ball 2023", 2023),
             ),
             listOf(
-                Gallery("/g/296", "Dragon Ball (2023)", 296L),
+                Gallery("/g/2", "Dragon Ball 2022", 2022),
+                Gallery("/g/1", "Dragon Ball 2021", 2021),
             ),
         )
 
         val deduplicator = PageDeduplicator<Gallery>(canonicalKey = { it.url })
-        val results = serverPages.flatMapIndexed { index, page ->
-            deduplicator.acceptPage(index + 1L, page, index < serverPages.lastIndex).items
+        val visible = mutableListOf<Gallery>()
+        pages.forEachIndexed { pageIndex, galleries ->
+            visible += deduplicator.acceptPage(
+                page = pageIndex + 1L,
+                items = galleries,
+                hasNextPage = pageIndex < pages.lastIndex,
+            ).items
+            assertEquals(
+                visible.map { it.year }.sortedDescending(),
+                visible.map { it.year },
+                "Page ${pageIndex + 1} introduced a year-order regression",
+            )
         }
-
-        assertEquals(listOf(300L, 299L, 298L, 297L, 296L), results.map { it.uploadedAt })
-        assertEquals(listOf(
-            "Dragon Ball (2021)",
-            "Dragon Ball (2026)",
-            "Dragon Ball (2019)",
-            "Dragon Ball (2025)",
-            "Dragon Ball (2023)",
-        ), results.map { it.title })
-        assertEquals(results.size, results.distinctBy { it.url }.size)
+        assertEquals(listOf(2026, 2025, 2024, 2023, 2022, 2021), visible.map { it.year })
     }
 
     @Test
