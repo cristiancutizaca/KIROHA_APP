@@ -92,6 +92,44 @@ class KirohaCoreTest {
     }
 
     @Test
+    fun `e hentai style search keeps latest uploads first regardless of title year`() {
+        // Simulates the gallery ordering already returned by an extension:
+        // upload timestamps are newest-first, but years embedded in titles
+        // describe the work, not the date a gallery was uploaded.
+        data class Gallery(val url: String, val title: String, val uploadedAt: Long)
+
+        val serverPages = listOf(
+            listOf(
+                Gallery("/g/300", "Dragon Ball (2021)", 300L),
+                Gallery("/g/299", "Dragon Ball (2026)", 299L),
+            ),
+            listOf(
+                Gallery("/g/299", "Dragon Ball (2026)", 299L),
+                Gallery("/g/298", "Dragon Ball (2019)", 298L),
+                Gallery("/g/297", "Dragon Ball (2025)", 297L),
+            ),
+            listOf(
+                Gallery("/g/296", "Dragon Ball (2023)", 296L),
+            ),
+        )
+
+        val deduplicator = PageDeduplicator<Gallery>(canonicalKey = { it.url })
+        val results = serverPages.flatMapIndexed { index, page ->
+            deduplicator.acceptPage(index + 1L, page, index < serverPages.lastIndex).items
+        }
+
+        assertEquals(listOf(300L, 299L, 298L, 297L, 296L), results.map { it.uploadedAt })
+        assertEquals(listOf(
+            "Dragon Ball (2021)",
+            "Dragon Ball (2026)",
+            "Dragon Ball (2019)",
+            "Dragon Ball (2025)",
+            "Dragon Ball (2023)",
+        ), results.map { it.title })
+        assertEquals(results.size, results.distinctBy { it.url }.size)
+    }
+
+    @Test
     fun `pagination keeps distinct canonical URLs across pages`() {
         val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
         val first = deduplicator.accept(listOf("/entry/1", "/entry/2", "/entry/3"), true)
