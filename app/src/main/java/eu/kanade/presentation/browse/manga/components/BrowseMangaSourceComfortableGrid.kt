@@ -25,7 +25,6 @@ fun BrowseMangaSourceComfortableGrid(
     mangaList: LazyPagingItems<StateFlow<Manga>>,
     columns: GridCells,
     contentPadding: PaddingValues,
-    displayOrder: List<Int>? = null,
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
 ) {
@@ -48,21 +47,15 @@ fun BrowseMangaSourceComfortableGrid(
         items(
             count = snapshotCount,
             key = { index ->
-                val sourceIndex = displayOrder?.getOrNull(index) ?: index
-                keySnapshot.getOrNull(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
-                    ?: "manga-placeholder-$sourceIndex"
+                keySnapshot.getOrNull(index)?.value?.let { "${it.source}:${it.url}" }
+                    ?: "manga-placeholder-$index"
             },
         ) { index ->
-            val sourceIndex = displayOrder?.getOrNull(index) ?: index
             // This composition may outlive its paging generation for a frame.
             // Never index the next search's shorter list with an old layout position.
             val currentCount = mangaList.itemCount
-            if (sourceIndex !in 0 until currentCount) return@items
-            // When visually reordered, still prefetch the loaded paging tail.
-            if (displayOrder != null && index >= currentCount - 12) {
-                mangaList[currentCount - 1]
-            }
-            val manga by mangaList[sourceIndex]?.collectAsState() ?: return@items
+            if (index !in 0 until currentCount) return@items
+            val manga by mangaList[index]?.collectAsState() ?: return@items
             BrowseMangaSourceComfortableGridItem(
                 manga = manga,
                 onClick = { onMangaClick(manga) },

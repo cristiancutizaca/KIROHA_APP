@@ -25,7 +25,6 @@ fun BrowseAnimeSourceComfortableGrid(
     animeList: LazyPagingItems<StateFlow<Anime>>,
     columns: GridCells,
     contentPadding: PaddingValues,
-    displayOrder: List<Int>? = null,
     onAnimeClick: (Anime) -> Unit,
     onAnimeLongClick: (Anime) -> Unit,
 ) {
@@ -48,21 +47,15 @@ fun BrowseAnimeSourceComfortableGrid(
         items(
             count = snapshotCount,
             key = { index ->
-                val sourceIndex = displayOrder?.getOrNull(index) ?: index
-                keySnapshot.getOrNull(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
-                    ?: "anime-placeholder-$sourceIndex"
+                keySnapshot.getOrNull(index)?.value?.let { "${it.source}:${it.url}" }
+                    ?: "anime-placeholder-$index"
             },
         ) { index ->
-            val sourceIndex = displayOrder?.getOrNull(index) ?: index
             // This composition may outlive its paging generation for a frame.
             // Never index the next search's shorter list with an old layout position.
             val currentCount = animeList.itemCount
-            if (sourceIndex !in 0 until currentCount) return@items
-            // When visually reordered, still prefetch the loaded paging tail.
-            if (displayOrder != null && index >= currentCount - 12) {
-                animeList[currentCount - 1]
-            }
-            val anime by animeList[sourceIndex]?.collectAsState() ?: return@items
+            if (index !in 0 until currentCount) return@items
+            val anime by animeList[index]?.collectAsState() ?: return@items
             BrowseAnimeSourceComfortableGridItem(
                 anime = anime,
                 onClick = { onAnimeClick(anime) },

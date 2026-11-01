@@ -26,7 +26,6 @@ fun BrowseAnimeSourceList(
     entries: Int,
     topBarHeight: Int,
     contentPadding: PaddingValues,
-    displayOrder: List<Int>? = null,
     onAnimeClick: (Anime) -> Unit,
     onAnimeLongClick: (Anime) -> Unit,
 ) {
@@ -51,19 +50,13 @@ fun BrowseAnimeSourceList(
             items(
                 count = snapshotCount,
                 key = { index ->
-                    val sourceIndex = displayOrder?.getOrNull(index) ?: index
-                    keySnapshot.getOrNull(sourceIndex)?.value?.let { "${it.source}:${it.url}" }
-                        ?: "anime-placeholder-$sourceIndex"
+                    keySnapshot.getOrNull(index)?.value?.let { "${it.source}:${it.url}" }
+                        ?: "anime-placeholder-$index"
                 },
             ) { index ->
-                val sourceIndex = displayOrder?.getOrNull(index) ?: index
                 val currentCount = animeList.itemCount
-                if (sourceIndex !in 0 until currentCount) return@items
-                // Ordered browsing must still prefetch the paging tail.
-                if (displayOrder != null && index >= currentCount - 12) {
-                    animeList[currentCount - 1]
-                }
-                val anime by animeList[sourceIndex]?.collectAsState() ?: return@items
+                if (index !in 0 until currentCount) return@items
+                val anime by animeList[index]?.collectAsState() ?: return@items
                 BrowseAnimeSourceListItem(
                     anime = anime,
                     onClick = { onAnimeClick(anime) },

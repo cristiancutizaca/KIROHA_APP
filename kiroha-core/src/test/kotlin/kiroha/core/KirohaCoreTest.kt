@@ -92,45 +92,6 @@ class KirohaCoreTest {
     }
 
     @Test
-    fun `chronological browsing reorders late newer results across loaded pages`() {
-        val titles = listOf("A (2026)", "B 2025", "C [2021]", "D (2026)")
-        val order = BrowseChronology.newestFirstIndices(titles)
-        assertEquals(listOf(0, 3, 1, 2), order)
-        assertEquals(listOf("A (2026)", "D (2026)", "B 2025", "C [2021]"), order!!.map(titles::get))
-    }
-
-    @Test
-    fun `chronological browsing preserves undated source feeds`() {
-        assertNull(BrowseChronology.newestFirstIndices(listOf("Unknown", "A 2025", "Another", "Third")))
-        assertNull(BrowseChronology.newestFirstIndices(listOf("A 2026", "B 2025", "C 2024")))
-    }
-
-    @Test
-    fun `search results with two dated entries and many undated entries are still sorted`() {
-        val titles = listOf("A 2021", "Unknown A", "B 2026", "Unknown B", "Unknown C")
-        assertEquals(listOf(2, 0, 1, 3, 4), BrowseChronology.newestFirstIndices(titles))
-    }
-
-    @Test
-    fun `partially loaded chronological search reorders without touching placeholders`() {
-        val order = BrowseChronology.loadedWindowIndices(
-            totalCount = 7,
-            placeholdersBefore = 2,
-            loadedTitles = listOf("Series 2021", "Series 2026", "Series 2025"),
-        )
-        assertEquals(listOf(0, 1, 3, 4, 2, 5, 6), order)
-        assertNull(BrowseChronology.loadedWindowIndices(3, 0, listOf("Undated", "A 2026")))
-    }
-
-    @Test
-    fun `chronological browsing retains tie order and undated entries`() {
-        val titles = listOf("A 2024", "Undated", "B 2026", "C 2026", "D 2022")
-        assertEquals(listOf(2, 3, 0, 4, 1), BrowseChronology.newestFirstIndices(titles))
-        assertEquals(2026, BrowseChronology.yearInTitle("1989 reboot 2026"))
-        assertNull(BrowseChronology.yearInTitle("Season 3"))
-    }
-
-    @Test
     fun `pagination keeps distinct canonical URLs across pages`() {
         val deduplicator = PageDeduplicator<String>(canonicalKey = { it })
         val first = deduplicator.accept(listOf("/entry/1", "/entry/2", "/entry/3"), true)
