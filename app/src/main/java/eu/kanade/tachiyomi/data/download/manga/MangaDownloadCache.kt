@@ -10,6 +10,7 @@ import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.extension.manga.MangaExtensionManager
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.util.size
+import kiroha.core.KirohaDownloadPaths
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -139,28 +140,33 @@ class MangaDownloadCache(
     private val legacyProbeLimit = Semaphore(1)
     private var legacyNotificationJob: Job? = null
 
-    // A title-only folder is eligible for automatic recovery ONLY when exactly
-    // one favorited manga from this source has that title. Snapshot the titles
-    // once instead of querying a large library for every chapter.
+    // Old Aniyomi folders have no URL suffix. Keep the strict unique-owner
+    // rule for library entries, but also recover single-chapter galleries that
+    // the user opens directly from the source without favoriting 600+ items.
     private data class LegacyLibraryKey(val sourceId: Long, val title: String)
     private val legacyLibraryOwnerMutex = Mutex()
-    @Volatile private var legacyLibraryOwners: Map<LegacyLibraryKey, String>? = null
+    // Do not discard duplicate titles: ambiguity must block legacy recovery.
+    @Volatile private var legacyLibraryOwners: Map<LegacyLibraryKey, Set<String>>? = null
 
-    private suspend fun libraryChapterCountIfUniquelyOwned(key: LegacyChapterKey): Int? {
-        val owners = legacyLibraryOwners ?: legacyLibraryOwnerMutex.withLock {
+    private suspend fun chapterCountForLegacyRecovery(key: LegacyChapterKey): Int? {
+        val favoriteOwners = legacyLibraryOwners ?: legacyLibraryOwnerMutex.withLock {
             legacyLibraryOwners ?: mangaRepository.getMangaFavorites()
                 .groupBy { LegacyLibraryKey(it.source, it.title) }
-                .mapNotNull { (folderKey, manga) ->
-                    if (manga.size == 1) folderKey to manga.single().url else null
-                }
-                .toMap()
+                .mapValues { (_, manga) -> manga.mapTo(mutableSetOf()) { it.url } }
                 .also { legacyLibraryOwners = it }
         }
-        if (owners[LegacyLibraryKey(key.sourceId, key.mangaTitle)] != key.mangaUrl) return null
+        val owners = favoriteOwners[LegacyLibraryKey(key.sourceId, key.mangaTitle)].orEmpty()
         val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: return null
-        if (!manga.favorite) return null
+        if (manga.title != key.mangaTitle) return null
         val chapters = chapterRepository.getChapterByMangaId(manga.id)
-        return chapters.size.takeIf { it > 0 && chapters.any { chapter -> chapter.url == key.chapterUrl } }
+        val canRecover = KirohaDownloadPaths.permitsLegacyTitleRecovery(
+            favoriteOwnerUrls = owners,
+            mangaUrl = key.mangaUrl,
+            isFavorite = manga.favorite,
+            chapterCount = chapters.size,
+            matchingChapterCount = chapters.count { it.url == key.chapterUrl },
+        )
+        return chapters.size.takeIf { canRecover }
     }
 
     private companion object {
@@ -254,7 +260,7 @@ class MangaDownloadCache(
                         val verified = provider.findVerifiedLegacyChapterDir(
                             chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
                         )
-                        verified != null || libraryChapterCountIfUniquelyOwned(key)?.let { count ->
+                        verified != null || chapterCountForLegacyRecovery(key)?.let { count ->
                             provider.findUniqueLegacyChapterDir(
                                 chapterName = chapterName,
                                 chapterScanlator = chapterScanlator,
@@ -273,12 +279,13 @@ class MangaDownloadCache(
                             val mangaKey = LegacyMangaKey(key.mangaUrl, key.mangaTitle, key.sourceId)
                             legacyCounts.computeIfAbsent(mangaKey) { AtomicInteger(0) }.incrementAndGet()
                         }
-                        // Coalesce UI refreshes: finding hundreds of existing files
-                        // must not trigger hundreds of simultaneous recompositions.
-                        legacyNotificationJob?.cancel()
-                        legacyNotificationJob = scope.launchIO {
-                            delay(500L)
-                            _changes.send(Unit)
+                        // Throttle instead of debounce: a long legacy scan must
+                        // update the UI periodically, not only after its last hit.
+                        if (legacyNotificationJob?.isActive != true) {
+                            legacyNotificationJob = scope.launchIO {
+                                delay(500L)
+                                _changes.send(Unit)
+                            }
                         }
                     }
                 } catch (cancelled: CancellationException) {
@@ -323,11 +330,13 @@ class MangaDownloadCache(
     fun getTotalDownloadCount(): Int {
         renewCache()
 
-        return rootDownloadsDir.sourceDirs.values.sumOf { sourceDir ->
+        val current = rootDownloadsDir.sourceDirs.values.sumOf { sourceDir ->
             sourceDir.mangaDirs.values.sumOf { mangaDir ->
                 mangaDir.chapterDirs.size
             }
         }
+        // The namespaced index does not contain recovered legacy downloads.
+        return current + legacyCounts.values.sumOf { it.get() }
     }
 
     /**
