@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.browse.manga.source.browse
 
+import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.runtime.Immutable
@@ -27,6 +28,7 @@ import eu.kanade.domain.source.manga.interactor.GetMangaIncognitoState
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.track.manga.interactor.AddMangaTracks
 import eu.kanade.tachiyomi.data.cache.MangaCoverCache
+import eu.kanade.tachiyomi.ui.browse.BrowseSourceSessionStore
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
@@ -70,6 +72,7 @@ class BrowseMangaSourceViewModel(
     @Assisted listingQuery: String?,
     sourceManager: MangaSourceManager,
     sourcePreferences: SourcePreferences,
+    private val context: Context,
     private val libraryPreferences: LibraryPreferences,
     private val coverCache: MangaCoverCache,
     private val getRemoteManga: GetRemoteManga,
@@ -84,8 +87,20 @@ class BrowseMangaSourceViewModel(
     getIncognitoState: GetMangaIncognitoState,
 ) : ViewModel() {
 
+    private val isBrowseIncognito = getIncognitoState.await(sourceId)
+
     val state: StateFlow<BrowseMangaSourceViewModel.State>
-        field = MutableStateFlow<BrowseMangaSourceViewModel.State>(State(Listing.valueOf(listingQuery)))
+        field = MutableStateFlow<BrowseMangaSourceViewModel.State>(
+            State(
+                Listing.valueOf(
+                    if (isBrowseIncognito) {
+                        listingQuery
+                    } else {
+                        BrowseSourceSessionStore.restore(context, "manga", sourceId, listingQuery)
+                    },
+                ),
+            ),
+        )
 
     @AssistedFactory
     @ManualViewModelAssistedFactoryKey
@@ -117,7 +132,7 @@ class BrowseMangaSourceViewModel(
             }
         }
 
-        if (!getIncognitoState.await(source.id)) {
+        if (!isBrowseIncognito) {
             sourcePreferences.lastUsedSource.set(source.id)
         }
     }
@@ -182,6 +197,17 @@ class BrowseMangaSourceViewModel(
 
     fun setListing(listing: Listing) {
         state.update { it.copy(listing = listing, toolbarQuery = null) }
+        persistBrowseQuery()
+    }
+
+    private fun persistBrowseQuery() {
+        if (isBrowseIncognito) return
+        BrowseSourceSessionStore.remember(
+            context,
+            "manga",
+            sourceId,
+            (state.value.listing as? Listing.Search)?.query,
+        )
     }
 
     fun setFilters(filters: FilterList) {
@@ -211,6 +237,7 @@ class BrowseMangaSourceViewModel(
                 searchGeneration = it.searchGeneration + 1,
             )
         }
+        persistBrowseQuery()
     }
 
     fun searchGenre(genreName: String) {
@@ -256,6 +283,7 @@ class BrowseMangaSourceViewModel(
                 toolbarQuery = listing.query,
             )
         }
+        persistBrowseQuery()
     }
 
     /**
