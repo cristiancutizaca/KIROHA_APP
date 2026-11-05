@@ -42,3 +42,13 @@ Si falta compatibilidad con archivos antiguos, añadir posteriormente una pantal
 - El contador global de capítulos incluye los capítulos antiguos que ya se han verificado. Las notificaciones se aceleran con actualizaciones periódicas durante un escaneo extenso, en lugar de esperar hasta el final.
 - **Límite:** los archivos antiguos sin URL verificable tienen una identidad inferida por el título; una galería no guardada con un título idéntico al de otra galería remota todavía puede ser ambigua. En esos casos, para recuperar con total seguridad hace falta una vinculación explícita.
 - **Sin prueba de dispositivo todavía:** validar con las 658 carpetas antiguas y las 1936 nuevas de las capturas del usuario, revisar el indicador de descarga, lectura offline, títulos duplicados y el comando de reconstrucción del índice.
+
+## Rendimiento y continuidad de búsqueda (04/11/2026)
+- Las consultas del catálogo comprueban primero un índice en memoria de los nombres de carpetas: si no existe una carpeta antigua para ese título, se evita crear una tarea de recuperación de descarga y consultar DB o SAF.
+- El índice de carpetas se construye en un hilo IO una vez por fuente. Se invalida al reconstruir la caché o cambiar almacenamiento. No se leen imágenes para este filtro.
+- En las pantallas de fuentes de manga y anime se conservan los estados de desplazamiento de lista y cuadrícula durante cambios de presentación y recreaciones de Activity que mantengan el estado guardado.
+- Se recuerda hasta siete días la última búsqueda de texto por extensión, incluida la selección Popular/Recientes, para restablecerla tras una muerte del proceso. Se da prioridad a una búsqueda explícita recibida al abrir la pantalla. El modo incógnito no lee ni guarda estas sesiones.
+- El texto de una búsqueda con filtros no equivale a sus filtros: estos NO se serializan, para no ejecutar por accidente filtros distintos. Una búsqueda guardada con filtros de la fuente anime tampoco se persiste como sesión de texto.
+- **Límite de restablecimiento:** la posición exacta en una página muy profunda no está garantizada si Android destruye el proceso, porque Paging descarga de nuevo los resultados remotos. La continuidad sí se mantiene mientras sobreviva la pantalla/proceso y Android conserve el estado guardado.
+- **Pendiente en dispositivo:** analizar reinicios reales (ANR, OOM, crash, recuperación del SO), medir tiempo frío y caliente de índices y abrir/cerrar extensiones tras varias horas.
+- Los workflows de GitHub Actions deben completarse antes de declarar que el APK está compilado o que estas mejoras están probadas.
