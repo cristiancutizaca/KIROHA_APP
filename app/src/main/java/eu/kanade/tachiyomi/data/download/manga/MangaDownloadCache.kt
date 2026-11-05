@@ -129,6 +129,9 @@ class MangaDownloadCache(
     private data class LegacyMangaKey(val mangaUrl: String, val mangaTitle: String, val sourceId: Long)
 
     private val legacyResults = ConcurrentHashMap<LegacyChapterKey, Boolean>()
+    // A search result may be checked before its manga/chapters are persisted.
+    // Retry negative matches later so opening that gallery can recover it.
+    private val legacyNegativeChecks = ConcurrentHashMap<LegacyChapterKey, Long>()
     // O(1) download counters for large libraries. Counting all chapter checks
     // for every library card was quadratic as the positive cache grew.
     private val legacyCounts = ConcurrentHashMap<LegacyMangaKey, AtomicInteger>()
@@ -172,6 +175,7 @@ class MangaDownloadCache(
     private companion object {
         const val MAX_PENDING_LEGACY_CHECKS = 24
         const val MAX_DEFERRED_LEGACY_CHECKS = 4096
+        const val LEGACY_NEGATIVE_RECHECK_MS = 60_000L
     }
 
     init {
@@ -231,7 +235,13 @@ class MangaDownloadCache(
                 .any { it in mangaDir.chapterDirs }) return true
 
         val key = LegacyChapterKey(chapterName, chapterScanlator, chapterUrl, mangaTitle, mangaUrl, sourceId)
-        legacyResults[key]?.let { return it }
+        legacyResults[key]?.let { cached ->
+            if (cached) return true
+            val lastChecked = legacyNegativeChecks[key] ?: 0L
+            if (System.currentTimeMillis() - lastChecked < LEGACY_NEGATIVE_RECHECK_MS) return false
+            legacyResults.remove(key, false)
+            legacyNegativeChecks.remove(key)
+        }
 
         if (legacyInFlight.add(key)) {
             // A library can present thousands of chapters at once. Avoid
@@ -275,6 +285,7 @@ class MangaDownloadCache(
                     if (generation != legacyGeneration.get()) return@launchIO
                     val previous = legacyResults.put(key, found)
                     if (found) {
+                        legacyNegativeChecks.remove(key)
                         if (previous != true) {
                             val mangaKey = LegacyMangaKey(key.mangaUrl, key.mangaTitle, key.sourceId)
                             legacyCounts.computeIfAbsent(mangaKey) { AtomicInteger(0) }.incrementAndGet()
@@ -287,12 +298,17 @@ class MangaDownloadCache(
                                 _changes.send(Unit)
                             }
                         }
+                    } else {
+                        legacyNegativeChecks[key] = System.currentTimeMillis()
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     logcat(LogPriority.WARN, error) { "Legacy manga chapter validation failed" }
-                    if (generation == legacyGeneration.get()) legacyResults[key] = false
+                    if (generation == legacyGeneration.get()) {
+                        legacyResults[key] = false
+                        legacyNegativeChecks[key] = System.currentTimeMillis()
+                    }
                 } finally {
                     legacyInFlight.remove(key)
                     pendingLegacyChecks.decrementAndGet()
@@ -499,6 +515,7 @@ class MangaDownloadCache(
     fun invalidateCache() {
         legacyGeneration.incrementAndGet()
         legacyResults.clear()
+        legacyNegativeChecks.clear()
         legacyCounts.clear()
         while (true) {
             val deferred = deferredLegacyChecks.poll() ?: break
