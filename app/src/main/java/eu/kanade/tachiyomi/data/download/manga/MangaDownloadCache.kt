@@ -267,20 +267,24 @@ class MangaDownloadCache(
                     sourceManager.isInitialized.first { it }
                     val found = legacyProbeLimit.withPermit {
                         val source = sourceManager.getOrStub(sourceId)
-                        val verified = provider.findVerifiedLegacyChapterDir(
-                            chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
-                        )
-                        verified != null || chapterCountForLegacyRecovery(key)?.let { count ->
-                            provider.findUniqueLegacyChapterDir(
-                                chapterName = chapterName,
-                                chapterScanlator = chapterScanlator,
-                                chapterUrl = chapterUrl,
-                                mangaTitle = mangaTitle,
-                                source = source,
-                                mangaUrl = mangaUrl,
-                                allowUnnamedSingleChapter = count == 1,
-                            ) != null
-                        } == true
+                        if (!provider.hasLegacyMangaTitleFolder(mangaTitle, source)) {
+                            false
+                        } else {
+                            val verified = provider.findVerifiedLegacyChapterDir(
+                                chapterName, chapterScanlator, chapterUrl, mangaTitle, source, mangaUrl,
+                            )
+                            verified != null || chapterCountForLegacyRecovery(key)?.let { count ->
+                                provider.findUniqueLegacyChapterDir(
+                                    chapterName = chapterName,
+                                    chapterScanlator = chapterScanlator,
+                                    chapterUrl = chapterUrl,
+                                    mangaTitle = mangaTitle,
+                                    source = source,
+                                    mangaUrl = mangaUrl,
+                                    allowUnnamedSingleChapter = count == 1,
+                                ) != null
+                            } == true
+                        }
                     }
                     if (generation != legacyGeneration.get()) return@launchIO
                     val previous = legacyResults.put(key, found)
