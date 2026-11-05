@@ -206,7 +206,7 @@ class BrowseMangaSourceViewModel(
             context,
             "manga",
             sourceId,
-            (state.value.listing as? Listing.Search)?.query,
+            state.value.listing.query,
         )
     }
 
