@@ -53,6 +53,69 @@ class KirohaDownloadPathsTest {
     }
 
     @Test
+    fun oneChapterGalleryOpenedOutsideTheLibraryCanUseUnclaimedLegacyFolder() {
+        assertTrue(
+            KirohaDownloadPaths.permitsLegacyTitleRecovery(
+                favoriteOwnerUrls = emptySet(),
+                mangaUrl = "/g/123/gallery",
+                isFavorite = false,
+                chapterCount = 1,
+                matchingChapterCount = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun multiChapterUnfavoritedGalleryCannotClaimTitleOnlyLegacyFolder() {
+        assertFalse(
+            KirohaDownloadPaths.permitsLegacyTitleRecovery(
+                favoriteOwnerUrls = emptySet(),
+                mangaUrl = "/g/123/gallery",
+                isFavorite = false,
+                chapterCount = 2,
+                matchingChapterCount = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun sameTitleWithOtherOrMultipleFavoritesBlocksUnverifiedRecovery() {
+        for (owners in listOf(setOf("/g/other"), setOf("/g/123/gallery", "/g/other"))) {
+            assertFalse(
+                KirohaDownloadPaths.permitsLegacyTitleRecovery(
+                    favoriteOwnerUrls = owners,
+                    mangaUrl = "/g/123/gallery",
+                    isFavorite = true,
+                    chapterCount = 1,
+                    matchingChapterCount = 1,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun uniqueFavoriteAndMatchingChapterCanRecoverAnOldDirectory() {
+        assertTrue(
+            KirohaDownloadPaths.permitsLegacyTitleRecovery(
+                favoriteOwnerUrls = setOf("/g/123/gallery"),
+                mangaUrl = "/g/123/gallery",
+                isFavorite = true,
+                chapterCount = 3,
+                matchingChapterCount = 1,
+            ),
+        )
+        assertFalse(
+            KirohaDownloadPaths.permitsLegacyTitleRecovery(
+                favoriteOwnerUrls = setOf("/g/123/gallery"),
+                mangaUrl = "/g/123/gallery",
+                isFavorite = true,
+                chapterCount = 3,
+                matchingChapterCount = 0,
+            ),
+        )
+    }
+
+    @Test
     fun neverMergeUnrelatedSourceFoldersByApproximateName() {
         val displayName = "E-Hentai (EN)"
         assertFalse(KirohaDownloadPaths.matchesSourceFolder("Hitomi (ES)__s_1234", displayName))
