@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.browse.anime.source.browse
 
+import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.runtime.Immutable
@@ -39,6 +40,7 @@ import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.FilterList
 import eu.kanade.tachiyomi.data.cache.AnimeBackgroundCache
 import eu.kanade.tachiyomi.data.cache.AnimeCoverCache
+import eu.kanade.tachiyomi.ui.browse.BrowseSourceSessionStore
 import eu.kanade.tachiyomi.util.removeBackgrounds
 import eu.kanade.tachiyomi.util.removeCovers
 import kotlinx.collections.immutable.ImmutableList
@@ -103,6 +105,7 @@ class BrowseAnimeSourceViewModel(
     // SY <--
     sourceManager: AnimeSourceManager,
     sourcePreferences: SourcePreferences,
+    private val context: Context,
     private val libraryPreferences: LibraryPreferences,
     private val coverCache: AnimeCoverCache,
     private val backgroundCache: AnimeBackgroundCache,
@@ -124,8 +127,20 @@ class BrowseAnimeSourceViewModel(
     // SY <--
 ) : ViewModel() {
 
+    private val isBrowseIncognito = getIncognitoState.await(sourceId)
+
     val state: StateFlow<BrowseAnimeSourceViewModel.State>
-        field = MutableStateFlow<BrowseAnimeSourceViewModel.State>(State(Listing.valueOf(listingQuery)))
+        field = MutableStateFlow<BrowseAnimeSourceViewModel.State>(
+            State(
+                Listing.valueOf(
+                    if (isBrowseIncognito || savedSearch != null || filtersJson != null) {
+                        listingQuery
+                    } else {
+                        BrowseSourceSessionStore.restore(context, "anime", sourceId, listingQuery)
+                    },
+                ),
+            ),
+        )
 
     @AssistedFactory
     @ManualViewModelAssistedFactoryKey
@@ -180,7 +195,7 @@ class BrowseAnimeSourceViewModel(
                 }
             }.join()
 
-            if (!getIncognitoState.await(source.id)) {
+            if (!isBrowseIncognito) {
                 sourcePreferences.lastUsedSource.set(source.id)
             }
 
@@ -284,6 +299,18 @@ class BrowseAnimeSourceViewModel(
 
     fun setListing(listing: Listing) {
         state.update { it.copy(listing = listing, toolbarQuery = null) }
+        persistBrowseQuery()
+    }
+
+    private fun persistBrowseQuery() {
+        if (isBrowseIncognito) return
+        val listing = state.value.listing as? Listing.Search
+        BrowseSourceSessionStore.remember(
+            context,
+            "anime",
+            sourceId,
+            listing?.query.takeIf { listing?.savedSearchId == null },
+        )
     }
 
     fun setFilters(filters: FilterList) {
@@ -330,6 +357,7 @@ class BrowseAnimeSourceViewModel(
                 searchGeneration = it.searchGeneration + 1,
             )
         }
+        persistBrowseQuery()
     }
 
     fun searchGenre(genreName: String) {
@@ -376,6 +404,7 @@ class BrowseAnimeSourceViewModel(
                 toolbarQuery = listing.query,
             )
         }
+        persistBrowseQuery()
     }
 
     /**
@@ -611,6 +640,9 @@ class BrowseAnimeSourceViewModel(
                     toolbarQuery = search.query,
                 )
             }
+            // Filter-heavy saved searches cannot be serialized as plain text.
+            // Do not restore one later with incorrect/default filters.
+            persistBrowseQuery()
         }
     }
 
