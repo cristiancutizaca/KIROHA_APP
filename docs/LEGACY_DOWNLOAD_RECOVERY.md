@@ -32,3 +32,13 @@ Esta etapa **no migra archivos físicamente**. La recuperación por título de i
 9. Compilar y revisar `spotlessCheck`, `compileDebugKotlin` y pruebas de dispositivo real.
 
 Si falta compatibilidad con archivos antiguos, añadir posteriormente una pantalla de **vinculación manual segura**, con copia de seguridad y confirmación de usuario, antes de permitir renombrar/mover.
+
+
+## Ajuste de compatibilidad: 04/11/2026
+- La ruta antigua `downloads/E-Hentai (EN)/<titulo>/<capitulo>` y la nueva `downloads/E-Hentai (EN)__s_<id>/<titulo>__k_<hash>/<capitulo>` conviven en lectura, sin mover ni renombrar archivos.
+- La recuperación automática de una galería de **un capítulo** ya no exige agregarla previamente a favoritos: también funciona después de abrirla desde la extensión, cuando el registro y el capítulo están disponibles en la base de datos, la carpeta antigua es única y contiene imágenes válidas.
+- Se mantienen bloqueos de colisiones: títulos favoritos duplicados o vinculados a otra URL, varias carpetas antiguas del mismo título, metadatos incompatibles y capítulos sin contenido válido.
+- Para obras antiguas de varios capítulos sin metadatos se conserva el criterio más estricto: biblioteca con propietario único y coincidencia de capítulo.
+- El contador global de capítulos incluye los capítulos antiguos que ya se han verificado. Las notificaciones se aceleran con actualizaciones periódicas durante un escaneo extenso, en lugar de esperar hasta el final.
+- **Límite:** los archivos antiguos sin URL verificable tienen una identidad inferida por el título; una galería no guardada con un título idéntico al de otra galería remota todavía puede ser ambigua. En esos casos, para recuperar con total seguridad hace falta una vinculación explícita.
+- **Sin prueba de dispositivo todavía:** validar con las 658 carpetas antiguas y las 1936 nuevas de las capturas del usuario, revisar el indicador de descarga, lectura offline, títulos duplicados y el comando de reconstrucción del índice.
