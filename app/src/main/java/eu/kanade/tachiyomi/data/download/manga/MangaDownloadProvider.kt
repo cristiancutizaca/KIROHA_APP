@@ -147,6 +147,28 @@ class MangaDownloadProvider(
     }
 
     /**
+     * Cheap preflight for legacy recovery. Catalog searches contain many titles
+     * that were never downloaded; do not hit the manga/chapter database or
+     * attempt ComicInfo reads for those results.
+     *
+     * The source-folder index is created once per source and invalidated by
+     * the download cache when the storage root changes or is rescanned.
+     * Call on Dispatchers.IO, since the first lookup enumerates SAF folders.
+     */
+    fun hasLegacyMangaTitleFolder(mangaTitle: String, source: MangaSource): Boolean {
+        if (source !is HttpSource) return false
+        val root = downloadsDir ?: return false
+        val titles = listOf(
+            libraryPreferences.disallowNonAsciiFilenames.get(),
+            !libraryPreferences.disallowNonAsciiFilenames.get(),
+        ).map { asciiOnly ->
+            DiskUtil.buildValidFilename(mangaTitle, DiskUtil.MAX_FILE_NAME_BYTES, asciiOnly)
+        }.distinct()
+        val indexed = legacySourceFolders(root, source)
+        return titles.any { !indexed[it].isNullOrEmpty() }
+    }
+
+    /**
      * Read-only fallback for the old downloads/<source label>/<title>/<chapter> layout.
      * Old title-only directories may contain several distinct galleries. Never rename,
      * delete, or claim the whole parent directory just because the title matches.
