@@ -147,6 +147,23 @@ class MangaDownloadProvider(
     }
 
     /**
+     * Non-blocking hot-path check used by the UI. Once a source's legacy
+     * directory names are indexed in the IO worker, skip scheduling another
+     * coroutine for every catalog item that has no legacy folder. A null
+     * (not yet indexed) or stale source index must not be treated as absence.
+     */
+    fun isLegacyMangaTitleKnownAbsent(mangaTitle: String, sourceId: Long): Boolean {
+        val index = legacyFolderIndex[sourceId] ?: return false
+        val titleVariants = listOf(
+            libraryPreferences.disallowNonAsciiFilenames.get(),
+            !libraryPreferences.disallowNonAsciiFilenames.get(),
+        ).map { asciiOnly ->
+            DiskUtil.buildValidFilename(mangaTitle, DiskUtil.MAX_FILE_NAME_BYTES, asciiOnly)
+        }.distinct()
+        return titleVariants.none { !index.folders[it].isNullOrEmpty() }
+    }
+
+    /**
      * Cheap preflight for legacy recovery. Catalog searches contain many titles
      * that were never downloaded; do not hit the manga/chapter database or
      * attempt ComicInfo reads for those results.
