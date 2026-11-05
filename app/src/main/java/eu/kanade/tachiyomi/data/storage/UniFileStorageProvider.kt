@@ -8,6 +8,7 @@ import kiroha.core.StorageType
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 /** Android adapter for the active downloads tree; supports directory-based manga downloads. */
 class UniFileStorageProvider(
@@ -16,6 +17,12 @@ class UniFileStorageProvider(
     override val type: StorageType = StorageType.INTERNAL,
     override val displayName: String = "Downloads",
 ) : StorageProvider {
+    // A SAF directory lookup may list *every* child. A reindex of 2,000
+    // galleries under one source otherwise lists that source directory 2,000
+    // times (quadratic I/O). Cache ONLY the root and source-level children.
+    // Never retain each gallery's image list: that would grow with page count.
+    private val folderChildren = ConcurrentHashMap<String, Map<String, UniFile>>()
+
     override val isAvailable: Boolean get() = root.exists()
 
     override fun resolve(relativePath: String): StorageFile? = find(relativePath)?.let {
@@ -25,6 +32,9 @@ class UniFileStorageProvider(
     override fun open(relativePath: String): InputStream = requireFile(relativePath).openInputStream()
 
     override fun write(relativePath: String): OutputStream {
+        // The portable index and externally created paths must not leave stale
+        // directory snapshots after a write.
+        folderChildren.clear()
         val parts = clean(relativePath).split('/')
         val parent = parts.dropLast(1).fold(root) { current, name ->
             current.findFile(name) ?: current.createDirectory(name) ?: error("Unable to create storage directory")
@@ -34,7 +44,11 @@ class UniFileStorageProvider(
         return file.openOutputStream()
     }
 
-    override fun delete(relativePath: String): Boolean = find(relativePath)?.delete() == true
+    override fun delete(relativePath: String): Boolean {
+        val deleted = find(relativePath)?.delete() == true
+        if (deleted) folderChildren.clear()
+        return deleted
+    }
 
     override fun fingerprint(relativePath: String): FileFingerprint {
         val file = find(relativePath) ?: error("Storage file not found: $relativePath")
@@ -86,8 +100,24 @@ class UniFileStorageProvider(
         }
     }
 
-    private fun find(relativePath: String): UniFile? = clean(relativePath).split('/').fold(root) { current, name ->
-        current.findFile(name) ?: return null
+    private fun find(relativePath: String): UniFile? {
+        var current = root
+        clean(relativePath).split('/').forEachIndexed { depth, name ->
+            val child = if (depth < 2) {
+                // Cache source labels and their gallery folders for this
+                // short-lived reindex provider; deeper paths remain uncached.
+                val children = folderChildren.computeIfAbsent(current.uri.toString()) {
+                    current.listFiles().orEmpty()
+                        .filter { !it.name.isNullOrBlank() }
+                        .associateBy { it.name!! }
+                }
+                children[name]
+            } else {
+                current.findFile(name)
+            }
+            current = child ?: return null
+        }
+        return current
     }
 
     private fun requireFile(relativePath: String): UniFile = find(relativePath)?.takeIf { !it.isDirectory }
