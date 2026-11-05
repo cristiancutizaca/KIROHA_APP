@@ -3,6 +3,8 @@ package eu.kanade.presentation.browse.manga
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Public
@@ -52,6 +54,11 @@ fun BrowseSourceContent(
     onMangaLongClick: (Manga) -> Unit,
 ) {
     val context = LocalContext.current
+    // Keep both layouts' positions alive while toggling between list and grid.
+    // These states are saveable across Activity recreation while this screen
+    // remains on the navigation stack.
+    val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
 
     // Respect the extension's original pagination order. Re-sorting only the
     // currently loaded pages caused years to jump as more results arrived.
@@ -125,6 +132,7 @@ fun BrowseSourceContent(
             BrowseMangaSourceComfortableGrid(
                 mangaList = mangaList,
                 columns = columns,
+                gridState = gridState,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
@@ -147,6 +155,7 @@ fun BrowseSourceContent(
             BrowseMangaSourceList(
                 mangaList = mangaList,
                 entries = entries,
+                listState = listState,
                 topBarHeight = topBarHeight,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
@@ -158,6 +167,7 @@ fun BrowseSourceContent(
             BrowseMangaSourceCompactGrid(
                 mangaList = mangaList,
                 columns = columns,
+                gridState = gridState,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
