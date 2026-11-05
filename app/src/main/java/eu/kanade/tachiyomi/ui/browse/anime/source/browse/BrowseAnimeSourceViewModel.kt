@@ -309,7 +309,7 @@ class BrowseAnimeSourceViewModel(
             context,
             "anime",
             sourceId,
-            listing?.query.takeIf { listing?.savedSearchId == null },
+            if (listing?.savedSearchId != null) null else state.value.listing.query,
         )
     }
 
