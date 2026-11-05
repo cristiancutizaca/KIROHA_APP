@@ -3,6 +3,7 @@ package eu.kanade.presentation.browse.manga.components
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -26,19 +27,19 @@ fun BrowseMangaSourceList(
     entries: Int,
     topBarHeight: Int,
     contentPadding: PaddingValues,
+    listState: LazyListState = rememberLazyListState(),
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
 ) {
     // Older LazyColumn positions may be queried as the new search replaces paging data.
     val keySnapshot = mangaList.itemSnapshotList
     val snapshotCount = keySnapshot.size
-    val sourceListState = rememberLazyListState()
     BoxWithConstraints {
         val density = LocalDensity.current
         val containerHeightPx = with(density) { this@BoxWithConstraints.maxHeight.roundToPx() }
 
         LazyColumn(
-            state = sourceListState,
+            state = listState,
             contentPadding = contentPadding + PaddingValues(vertical = 8.dp),
         ) {
             item {
