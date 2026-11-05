@@ -234,6 +234,11 @@ class MangaDownloadCache(
         if (mangaDir != null && provider.getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl)
                 .any { it in mangaDir.chapterDirs }) return true
 
+        // After a source's legacy folders have been indexed, most search results
+        // can be rejected in memory. Do not enqueue thousands of no-op SAF and
+        // database probes for titles that were never downloaded.
+        if (provider.isLegacyMangaTitleKnownAbsent(mangaTitle, sourceId)) return false
+
         val key = LegacyChapterKey(chapterName, chapterScanlator, chapterUrl, mangaTitle, mangaUrl, sourceId)
         legacyResults[key]?.let { cached ->
             if (cached) return true
