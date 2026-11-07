@@ -317,6 +317,9 @@ class MangaExtensionManager(
     private fun <T : MangaExtension> StateFlow<Map<String, T>>.mapExtensions(
         scope: CoroutineScope,
     ): StateFlow<List<T>> {
-        return map { it.values.toList() }.stateIn(scope, SharingStarted.Lazily, value.values.toList())
+        // Global extension search reads installedExtensionsFlow.value directly. Lazy
+        // sharing leaves that value stuck at the initial empty list unless
+        // another screen happens to collect it first.
+        return map { it.values.toList() }.stateIn(scope, SharingStarted.Eagerly, value.values.toList())
     }
 }
