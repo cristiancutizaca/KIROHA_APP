@@ -4,12 +4,12 @@ import android.content.Context
 import aniyomi.core.common.torrent.DisabledTorrServerException
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.util.system.isOnline
+import tachiyomi.data.source.manga.MangaSourceNoResultsException
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.items.chapter.model.NoChaptersException
 import tachiyomi.domain.items.episode.model.NoEpisodesException
 import tachiyomi.domain.source.anime.model.AnimeSourceNotInstalledException
 import tachiyomi.domain.source.manga.model.SourceNotInstalledException
-import tachiyomi.data.source.manga.MangaSourceNoResultsException
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.aniyomi.AYMR
 import java.net.UnknownHostException
