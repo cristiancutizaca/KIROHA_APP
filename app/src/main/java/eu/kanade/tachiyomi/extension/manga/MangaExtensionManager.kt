@@ -64,6 +64,13 @@ class MangaExtensionManager(
     private val untrustedExtensionsMapFlow = MutableStateFlow(emptyMap<String, MangaExtension.Untrusted>())
     val untrustedExtensionsFlow = untrustedExtensionsMapFlow.mapExtensions(scope)
 
+    /**
+     * Synchronous snapshot for extension-scoped search. Unlike a lazily
+     * collected StateFlow, this is available as soon as extension loading ends.
+     */
+    fun getLoadedExtensions(): List<MangaExtension.Installed> =
+        installedExtensionsMapFlow.value.values.toList()
+
     private val _installerCancelEvents = MutableSharedFlow<Long>()
     val installerCancelEvents = _installerCancelEvents.asSharedFlow()
 
