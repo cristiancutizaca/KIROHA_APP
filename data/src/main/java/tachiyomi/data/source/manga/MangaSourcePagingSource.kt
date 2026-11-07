@@ -1,6 +1,5 @@
 package tachiyomi.data.source.manga
 
-import android.util.Log
 import androidx.paging.PagingState
 import kotlinx.coroutines.CancellationException
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -9,7 +8,6 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.source.manga.repository.SourcePagingSourceType
-import kiroha.core.PageDeduplicator
 
 class SourceSearchPagingSource(
     source: CatalogueSource,
@@ -36,75 +34,52 @@ class SourceLatestPagingSource(source: CatalogueSource) : SourcePagingSource(sou
     }
 }
 
+/**
+ * Mihon-compatible, forward-only source paging.
+ *
+ * Pages and ordering come directly from the installed extension. Do not sort,
+ * skip, or reinterpret the extension's result pages in the reader. This makes
+ * searches, popular titles, and latest updates behave like Mihon's browse.
+ */
 abstract class SourcePagingSource(
     protected val source: CatalogueSource,
 ) : SourcePagingSourceType() {
 
-    private val pageDeduplicator = PageDeduplicator<SManga>(canonicalKey = { it.url })
+    private val seenManga = hashSetOf<String>()
 
     abstract suspend fun requestNextPage(currentPage: Int): MangasPage
 
     override suspend fun load(params: LoadParams<Long>): LoadResult<Long, SManga> {
-        var page = params.key ?: 1L
-        var emptyPages = 0
+        val page = params.key ?: 1L
 
-        try {
-            while (true) {
-                val networkStart = System.nanoTime()
-                val response = withIOContext { requestNextPage(page.toInt()) }
-                val networkMs = (System.nanoTime() - networkStart) / 1_000_000
-                val dedupStart = System.nanoTime()
-                val filtered = pageDeduplicator.acceptPage(page, response.mangas, response.hasNextPage)
-                val dedupMs = (System.nanoTime() - dedupStart) / 1_000_000
-
-                Log.d(
-                    "KirohaPaging",
-                    "type=manga source=${source.id} page=$page " +
-                        "received=${response.mangas.size} unique=${filtered.items.size} " +
-                        "duplicates=${filtered.duplicatesRemoved} next=${response.hasNextPage} " +
-                        "networkMs=$networkMs dedupMs=$dedupMs",
-                )
-
-                if (filtered.items.isNotEmpty() || !response.hasNextPage) {
-                    return LoadResult.Page(
-                        data = filtered.items,
-                        prevKey = null,
-                        nextKey = if (response.hasNextPage) page + 1 else null,
-                    )
-                }
-
-                // An extension may return duplicate-only or empty intermediate pages.
-                // Skip forward inside this load instead of giving Paging an empty result.
-                // Report a recoverable error if a broken source never makes progress.
-                emptyPages++
-                if (emptyPages >= MAX_CONSECUTIVE_EMPTY_SOURCE_PAGES) {
-                    return LoadResult.Error(
-                        IllegalStateException(
-                            "manga source ${source.id} returned $emptyPages pages without new items",
-                        ),
-                    )
-                }
-                page++
+        return try {
+            val response = withIOContext {
+                requestNextPage(page.toInt())
+                    .takeIf { it.mangas.isNotEmpty() }
+                    ?: throw MangaSourceNoResultsException()
             }
+
+            // Keep the exact order returned by the extension, de-duplicating
+            // by its URL just as Mihon does.
+            val manga = response.mangas.filter { seenManga.add(it.url) }
+
+            LoadResult.Page(
+                data = manga,
+                prevKey = null,
+                nextKey = if (response.hasNextPage) page + 1 else null,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // Preserve the extension exception for the UI, but log the source/page
-            // that failed (e.g. an extension calling subList(25, 1)).
-            Log.e("KirohaPaging", "type=manga source=${source.id} page=$page load failed", e)
-            return LoadResult.Error(e)
+            LoadResult.Error(e)
         }
     }
 
-    private companion object {
-        const val MAX_CONSECUTIVE_EMPTY_SOURCE_PAGES = 12
-    }
-
     override fun getRefreshKey(state: PagingState<Long, SManga>): Long? {
-        // This source uses forward-only, page-numbered searches with no
-        // valid prevKey. Returning nextKey for an anchor starts a refresh at
-        // the *following* page and makes later results appear out of order.
-        // Reload from page 1 for every refresh, preserving source ordering.
+        // Rebuild from page 1. As this source is forward-only, using the next
+        // page as the refresh anchor silently drops earlier titles.
         return null
     }
 }
+
+class MangaSourceNoResultsException : Exception()
