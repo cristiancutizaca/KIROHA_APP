@@ -11,8 +11,8 @@ import eu.kanade.tachiyomi.extension.manga.MangaExtensionManager
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +29,6 @@ import tachiyomi.domain.entries.manga.interactor.GetManga
 import tachiyomi.domain.entries.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.entries.manga.model.Manga
 import tachiyomi.domain.source.manga.service.MangaSourceManager
-import java.util.concurrent.Executors
 
 abstract class MangaSearchViewModel(
     initialState: State = State(),
@@ -50,7 +49,8 @@ abstract class MangaSearchViewModel(
         state.update(function)
     }
 
-    private val coroutineDispatcher = Executors.newFixedThreadPool(5).asCoroutineDispatcher()
+    // Share Android's bounded IO pool instead of leaking a dedicated thread pool per screen.
+    private val coroutineDispatcher = Dispatchers.IO.limitedParallelism(5)
     private var searchJob: Job? = null
 
     private val enabledLanguages = sourcePreferences.enabledLanguages.get()
@@ -206,10 +206,12 @@ abstract class MangaSearchViewModel(
     }
 
     private fun updateItem(source: CatalogueSource, result: MangaSearchItemResult) {
-        val newItems = state.value.items.toMutableMap().apply {
-            this[source] = result
+        // Source requests finish concurrently. Update against the current state
+        // atomically so a later result cannot overwrite another source's result.
+        state.update { current ->
+            val items = current.items + (source to result)
+            current.copy(items = items.toSortedMap(sortComparator(items)))
         }
-        updateItems(newItems)
     }
 
     fun setMigrateDialog(currentId: Long, target: Manga) {
