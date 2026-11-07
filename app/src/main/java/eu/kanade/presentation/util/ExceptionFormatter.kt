@@ -9,6 +9,7 @@ import tachiyomi.domain.items.chapter.model.NoChaptersException
 import tachiyomi.domain.items.episode.model.NoEpisodesException
 import tachiyomi.domain.source.anime.model.AnimeSourceNotInstalledException
 import tachiyomi.domain.source.manga.model.SourceNotInstalledException
+import tachiyomi.data.source.manga.MangaSourceNoResultsException
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.aniyomi.AYMR
 import java.net.UnknownHostException
@@ -29,7 +30,7 @@ val Throwable.formattedMessage: String
                 }
             }
 
-            is NoChaptersException, is NoEpisodesException -> return context.stringResource(
+            is NoChaptersException, is NoEpisodesException, is MangaSourceNoResultsException -> return context.stringResource(
                 MR.strings.no_results_found,
             )
 
