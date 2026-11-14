@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.download.manga
 
 import android.content.Context
+import com.hippo.unifile.UniFile
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -148,8 +149,13 @@ class MangaDownloadManager(
         downloader.updateQueue(downloads)
     }
 
-    fun downloadChapters(manga: Manga, chapters: List<Chapter>, autoStart: Boolean = true) {
-        downloader.queueChapters(manga, chapters, autoStart)
+    suspend fun downloadChapters(manga: Manga, chapters: List<Chapter>, autoStart: Boolean = true) {
+        if (chapters.isEmpty()) return
+        val source = sourceManager.get(manga.source) as? HttpSource ?: return
+        withContext(Dispatchers.IO) {
+            val missing = chapters.filter { cache.resolveChapterFile(manga, it, source) == null }
+            downloader.queueChapters(manga, missing, autoStart)
+        }
     }
 
     fun addDownloadsToStartOfQueue(downloads: List<MangaDownload>) {
@@ -161,16 +167,12 @@ class MangaDownloadManager(
         if (!MangaDownloadJob.isRunning(context)) startDownloads()
     }
 
-    fun buildPageList(source: MangaSource, manga: Manga, chapter: Chapter): List<Page> {
-        val chapterDir = provider.findChapterDir(
-            chapterName = chapter.name,
-            chapterScanlator = chapter.scanlator,
-            chapterUrl = chapter.url,
-            mangaTitle = manga.title,
-            source = source,
-            mangaUrl = manga.url,
-        )
-        val files = chapterDir?.listFiles().orEmpty()
+    suspend fun resolveChapterFile(manga: Manga, chapter: Chapter, source: MangaSource): UniFile? {
+        return withContext(Dispatchers.IO) { cache.resolveChapterFile(manga, chapter, source) }
+    }
+
+    fun buildPageList(chapterDir: UniFile): List<Page> {
+        val files = chapterDir.listFiles().orEmpty()
             .filter { it.isFile && ImageUtil.isImage(it.name) { it.openInputStream() } }
 
         if (files.isEmpty()) {

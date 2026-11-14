@@ -1,13 +1,27 @@
 package kiroha.core
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class KirohaDownloadPathsTest {
+    @Test
+    fun usesTheSameSuffixAsEarlierKirohaVersions() {
+        assertEquals("__k_1b543f7a4adc3b09", KirohaDownloadPaths.mangaSuffix(100L, "/g/123/gallery"))
+    }
+
+    @Test
+    fun classifiesFolderNamesWithoutTreatingDigitsInTitlesAsAnIdentity() {
+        assertFalse(KirohaDownloadPaths.hasSourceIdentity("E-Hentai (EN)"))
+        assertTrue(KirohaDownloadPaths.hasSourceIdentity("E-Hentai (EN)__s_57122881048805941"))
+        assertTrue(KirohaDownloadPaths.matchesSourceFolder("E-Hentai (EN)__s_-1234", "E-Hentai (EN)"))
+        assertFalse(KirohaDownloadPaths.hasMangaIdentity("Chapter 123"))
+        assertTrue(KirohaDownloadPaths.hasMangaIdentity("Chapter 123__k_517809debb9c79d2"))
+    }
+
     @Test
     fun sameTitleDifferentUrlsCannotShareTheDownloadDirectory() {
         val first = KirohaDownloadPaths.mangaSuffix(100L, "/g/123/gallery")

@@ -1,21 +1,26 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
+import com.hippo.unifile.UniFile
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.cache.ChapterCache
+import eu.kanade.tachiyomi.data.database.models.manga.toDomainChapter
 import eu.kanade.tachiyomi.data.download.manga.MangaDownloadManager
-import eu.kanade.tachiyomi.data.download.manga.MangaDownloadProvider
-import tachiyomi.data.kiroha.KirohaDatabaseRepository
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import kiroha.core.AndroidKeyValueStore
+import kiroha.core.DeviceRegistry
+import kiroha.core.DownloadAvailability
+import kiroha.core.KirohaIdentity
 import kotlinx.coroutines.CoroutineScope
 import mihon.core.archive.archiveReader
 import mihon.core.archive.epubReader
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.data.kiroha.KirohaDatabaseRepository
 import tachiyomi.domain.entries.manga.model.Manga
 import tachiyomi.domain.source.manga.model.StubMangaSource
 import tachiyomi.domain.storage.service.StorageManager
@@ -30,7 +35,6 @@ class ChapterLoader(
     private val context: Context,
     private val scope: CoroutineScope,
     private val downloadManager: MangaDownloadManager,
-    private val downloadProvider: MangaDownloadProvider,
     private val kirohaDatabaseRepository: KirohaDatabaseRepository,
     private val storageManager: StorageManager,
     private val chapterCache: ChapterCache,
@@ -87,27 +91,16 @@ class ChapterLoader(
     /**
      * Returns the page loader to use for this [chapter].
      */
-    private fun getPageLoader(chapter: ReaderChapter): PageLoader {
-        val dbChapter = chapter.chapter
-        val isDownloaded = downloadManager.isChapterDownloaded(
-            chapterName = dbChapter.name,
-            chapterScanlator = dbChapter.scanlator,
-            chapterUrl = dbChapter.url,
-            mangaTitle = manga.title,
-            sourceId = manga.source,
-            skipCache = true,
-            mangaUrl = manga.url,
-        )
+    private suspend fun getPageLoader(chapter: ReaderChapter): PageLoader {
+        val chapterPath = if (source is LocalMangaSource) {
+            null
+        } else {
+            chapter.chapter.toDomainChapter()?.let { dbChapter ->
+                downloadManager.resolveChapterFile(manga, dbChapter, source)
+            } ?: indexedChapterPath(chapter)
+        }
         return when {
-            isDownloaded -> DownloadPageLoader(
-                chapter,
-                manga,
-                source,
-                downloadManager,
-                downloadProvider,
-                kirohaDatabaseRepository,
-                storageManager,
-            )
+            chapterPath != null -> DownloadPageLoader(downloadManager, chapterPath)
 
             source is LocalMangaSource -> source.getFormat(chapter.chapter).let { format ->
                 when (format) {
@@ -131,6 +124,21 @@ class ChapterLoader(
             )
 
             else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
+        }
+    }
+
+    private suspend fun indexedChapterPath(chapter: ReaderChapter): UniFile? {
+        if (manga.url.isBlank() || chapter.chapter.url.isBlank()) return null
+        val itemId = KirohaIdentity.mangaChapter(source.id.toString(), manga.url, chapter.chapter.url)
+        val deviceId = DeviceRegistry(AndroidKeyValueStore(context)).load()?.deviceId ?: return null
+        val root = storageManager.getDownloadsDirectory() ?: return null
+        val storageId = KirohaIdentity.storage(root.uri.toString(), root.uri.scheme == "content")
+        val record = kirohaDatabaseRepository.downloadsForItem(itemId).firstOrNull {
+            it.deviceId == deviceId && it.storageId == storageId &&
+                it.state == DownloadAvailability.AVAILABLE_LOCAL && !it.localPath.isNullOrBlank()
+        } ?: return null
+        return record.localPath!!.split('/').fold(root) { current, part ->
+            current.findFile(part) ?: return null
         }
     }
 }

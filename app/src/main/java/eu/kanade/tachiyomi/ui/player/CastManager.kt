@@ -198,11 +198,16 @@ class CastManager(
         }
     }
 
-    fun cleanup() {
+    fun stopDeviceDiscovery() {
         discoveryRetryJob?.cancel()
         mediaRouterCallback?.let { mediaRouter.removeCallback(it) }
         mediaRouterCallback = null
         releaseMulticastLock()
+    }
+
+    fun cleanup() {
+        stopDeviceDiscovery()
+        castProgressJob?.cancel()
         unregisterSessionListener()
         castSession = null
     }

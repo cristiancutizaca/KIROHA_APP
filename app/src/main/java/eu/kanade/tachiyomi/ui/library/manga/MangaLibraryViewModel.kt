@@ -459,6 +459,9 @@ class MangaLibraryViewModel(
             getLibraryItemPreferencesFlow(),
             downloadCache.changes.onEach { downloadCountCache.clear() },
         ) { libraryMangaList, prefs, _ ->
+            if (prefs.downloadBadge || prefs.filterDownloaded != TriState.DISABLED || prefs.globalFilterDownloaded) {
+                downloadCache.checkLegacyDownloads(libraryMangaList.map { it.manga }.distinctBy { it.id })
+            }
             val downloadCounts = HashMap<Long, Int>()
             libraryMangaList
                 .map { libraryManga ->

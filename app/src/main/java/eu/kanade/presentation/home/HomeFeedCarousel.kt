@@ -42,6 +42,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import tachiyomi.i18n.MR
@@ -62,13 +65,16 @@ fun HeroMediaCarousel(
     val displayList = remember(heroList) { heroList.take(7) }
     val pagerState = rememberPagerState(pageCount = { displayList.size })
 
-    // Auto-advance cada 4 segundos
-    LaunchedEffect(pagerState, displayList, autoScrollHero) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, pagerState, displayList.size, autoScrollHero) {
         if (autoScrollHero && displayList.size > 1) {
-            while (true) {
-                delay(4000L)
-                val nextPage = (pagerState.currentPage + 1) % displayList.size
-                pagerState.animateScrollToPage(nextPage)
+            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(4_000L)
+                    if (pagerState.isScrollInProgress) continue
+                    val nextPage = (pagerState.currentPage + 1) % pagerState.pageCount
+                    pagerState.animateScrollToPage(nextPage)
+                }
             }
         }
     }

@@ -26,6 +26,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowRgb565
 import coil3.request.crossfade
 import coil3.util.DebugLogger
+import com.hippo.unifile.UniFile
 import dev.mihon.injekt.patchInjekt
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.createGraphFactory
@@ -112,6 +113,10 @@ import eu.kanade.tachiyomi.data.download.manga.MangaDownloadProvider
 import eu.kanade.tachiyomi.data.download.manga.model.MangaDownload
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.saver.ImageSaver
+import eu.kanade.tachiyomi.data.storage.SafStorageRegistry
+import eu.kanade.tachiyomi.data.storage.UniFileStorageProvider
+import eu.kanade.tachiyomi.data.sync.KirohaSyncConfig
+import eu.kanade.tachiyomi.data.sync.KirohaSyncJob
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.data.sync.SyncManager
 import eu.kanade.tachiyomi.data.track.TrackerManager
@@ -129,36 +134,30 @@ import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
 import eu.kanade.tachiyomi.ui.player.settings.SubtitlePreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.LocalHttpServerHolder
+import eu.kanade.tachiyomi.util.size
 import eu.kanade.tachiyomi.util.system.DeviceUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import eu.kanade.tachiyomi.util.system.notify
-import eu.kanade.tachiyomi.util.size
-import com.hippo.unifile.UniFile
-import java.security.MessageDigest
 import kiroha.core.AndroidDeviceInfo
 import kiroha.core.AndroidKeyValueStore
 import kiroha.core.DeviceRegistry
 import kiroha.core.DownloadAvailability
 import kiroha.core.DownloadRecord
-import kiroha.core.LocalSyncJournal
 import kiroha.core.KirohaIdentity
+import kiroha.core.LocalSyncJournal
 import kiroha.core.PortableStorageIndex
 import kiroha.core.StorageReindexer
 import kiroha.core.StorageType
 import kiroha.core.SyncEntity
 import kiroha.core.SyncEvent
 import kiroha.core.SyncOperation
-import eu.kanade.tachiyomi.data.sync.KirohaSyncConfig
-import eu.kanade.tachiyomi.data.sync.KirohaSyncJob
-import eu.kanade.tachiyomi.data.storage.SafStorageRegistry
-import eu.kanade.tachiyomi.data.storage.UniFileStorageProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import logcat.AndroidLogcatLogger
@@ -169,7 +168,6 @@ import mihon.app.di.injekt.MetroInteropModule
 import mihon.core.metro.GraphProvider
 import mihon.core.migration.Migration
 import mihon.core.migration.Migrator
-import tachiyomi.data.kiroha.KirohaDatabaseRepository
 import mihon.domain.extension.anime.interactor.GetAnimeExtensionStoreCountAsFlow
 import mihon.domain.extension.anime.interactor.GetAnimeExtensionStores
 import mihon.domain.extension.manga.interactor.GetMangaExtensionStoreCountAsFlow
@@ -180,6 +178,7 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.data.kiroha.KirohaDatabaseRepository
 import tachiyomi.domain.backup.service.BackupPreferences
 import tachiyomi.domain.category.anime.interactor.CreateAnimeCategoryWithName
 import tachiyomi.domain.category.anime.interactor.DeleteAnimeCategory
@@ -292,6 +291,7 @@ import tachiyomi.source.local.image.anime.LocalEpisodeThumbnailManager
 import tachiyomi.source.local.image.manga.LocalMangaCoverManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.addSingleton
+import java.security.MessageDigest
 import java.security.Security
 import eu.kanade.domain.extension.manga.interactor.GetExtensionSources as GetMangaExtensionSources
 
@@ -336,9 +336,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     @Inject lateinit var kirohaDatabaseRepository: KirohaDatabaseRepository
 
     @Inject lateinit var mangaDownloadManager: MangaDownloadManager
+
     @Inject lateinit var animeDownloadManager: AnimeDownloadManager
+
     @Inject lateinit var mangaDownloadProvider: MangaDownloadProvider
+
     @Inject lateinit var animeDownloadProvider: AnimeDownloadProvider
+
     @Inject lateinit var storageManager: StorageManager
 
     private val disableIncognitoReceiver = DisableIncognitoReceiver()
@@ -359,9 +363,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         graph.inject(this)
         if (packageName == getProcessName()) {
             initializeKirohaDevice()
-            initializeKirohaStorageIndex()
             initializeKirohaDownloadRecorder()
             if (runCatching { KirohaSyncConfig.read(this) != null }.getOrDefault(false)) {
+                initializeKirohaStorageIndex()
                 KirohaSyncJob.enqueue(this)
                 KirohaSyncJob.ensurePeriodic(this)
             }
@@ -797,9 +801,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     private var kirohaStorageIndexJob: kotlinx.coroutines.Job? = null
 
-    /** Manual full reindex from Library; startup scans are rate limited independently. */
+    /** Refresh local badges even when device sync is disabled. */
     fun requestKirohaDownloadReindex() {
-        initializeKirohaStorageIndex(force = true)
+        graph.mangaDownloadCache.requestReindex()
+        graph.animeDownloadCache.requestReindex()
+        if (runCatching { KirohaSyncConfig.read(this) != null }.getOrDefault(false)) {
+            initializeKirohaStorageIndex(force = true)
+        }
     }
 
     private fun initializeKirohaStorageIndex(force: Boolean = false) {
@@ -816,38 +824,46 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     // A background scan must not compete with a live download queue.
                     if (mangaDownloadManager.queueState.value.isNotEmpty() ||
                         animeDownloadManager.queueState.value.isNotEmpty()
-                    ) return@launch
+                    ) {
+                        return@launch
+                    }
                 }
                 val activeRoot = storageManager.getDownloadsDirectory()
-            val providers = buildList {
-                activeRoot?.let { root ->
-                    add(
-                        UniFileStorageProvider(
-                            id = KirohaIdentity.storage(root.uri.toString(), root.uri.scheme == "content"),
-                            root = root,
-                            type = if (root.uri.scheme == "content") StorageType.SAF_TREE else StorageType.INTERNAL,
-                            displayName = "Downloads",
-                        ),
-                    )
-                }
-                addAll(SafStorageRegistry.providers(this@App))
-            }.distinctBy { it.id }
+                val providers = buildList {
+                    activeRoot?.let { root ->
+                        add(
+                            UniFileStorageProvider(
+                                id = KirohaIdentity.storage(root.uri.toString(), root.uri.scheme == "content"),
+                                root = root,
+                                type = if (root.uri.scheme == "content") StorageType.SAF_TREE else StorageType.INTERNAL,
+                                displayName = "Downloads",
+                            ),
+                        )
+                    }
+                    addAll(SafStorageRegistry.providers(this@App))
+                }.distinctBy { it.id }
 
-            providers.forEach { storage ->
-                val reconciled = StorageReindexer.reconcile(
-                    kirohaDatabaseRepository.downloads(),
-                    storage,
-                    device.deviceId,
-                    System.currentTimeMillis(),
-                )
-                kirohaDatabaseRepository.upsertDownloads(reconciled)
-                if (storage.isAvailable) {
-                    PortableStorageIndex(storage).write(
-                        reconciled.filter { it.storageId == storage.id && it.localPath != null && it.checksum != null }
-                            .map { PortableStorageIndex.Entry(it.itemId, it.localPath!!, it.checksum!!, it.size) },
+                if (providers.isEmpty()) return@launch
+                val records = kirohaDatabaseRepository.downloads()
+                providers.forEach { storage ->
+                    val reconciled = StorageReindexer.reconcile(
+                        records,
+                        storage,
+                        device.deviceId,
+                        System.currentTimeMillis(),
                     )
+                    kirohaDatabaseRepository.upsertDownloads(reconciled)
+                    if (storage.isAvailable) {
+                        PortableStorageIndex(storage).write(
+                            reconciled.filter {
+                                it.storageId == storage.id && it.localPath != null &&
+                                    it.checksum != null
+                            }
+                                .map { PortableStorageIndex.Entry(it.itemId, it.localPath!!, it.checksum!!, it.size) },
+                        )
+                    }
                 }
-            }
+
                 preferences.edit().putLong("last_completed_at", System.currentTimeMillis()).apply()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -911,28 +927,32 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     download.manga.url,
                     download.source.id,
                 ),
-                mangaDownloadProvider.getChapterDirName(download.chapter.name, download.chapter.scanlator, download.chapter.url),
+                mangaDownloadProvider.getChapterDirName(
+                    download.chapter.name,
+                    download.chapter.scanlator,
+                    download.chapter.url,
+                ),
             ).joinToString("/")
         }
         val record = DownloadRecord(
-                itemId = itemId,
-                deviceId = deviceId,
-                storageId = activeDownloadStorageId(),
-                state = when {
-                    downloaded && chapterDir != null -> DownloadAvailability.AVAILABLE_LOCAL
-                    download.status == MangaDownload.State.ERROR -> DownloadAvailability.ERROR
-                    else -> previous?.state ?: DownloadAvailability.MISSING
-                },
-                downloadedEver = downloaded || previous?.downloadedEver == true,
-                localPath = relativePath ?: previous?.localPath,
-                size = chapterDir?.size() ?: previous?.size ?: 0L,
-                checksum = chapterDir?.let(::fingerprintUniFile) ?: previous?.checksum,
-                downloadedAt = if (downloaded) previous?.downloadedAt ?: now else previous?.downloadedAt,
-                lastVerifiedAt = if (chapterDir != null) now else previous?.lastVerifiedAt,
-                chapterId = download.chapter.id.toString(),
-                sourceNamespace = sourceNamespace,
-                canonicalId = canonicalId,
-            )
+            itemId = itemId,
+            deviceId = deviceId,
+            storageId = activeDownloadStorageId(),
+            state = when {
+                downloaded && chapterDir != null -> DownloadAvailability.AVAILABLE_LOCAL
+                download.status == MangaDownload.State.ERROR -> DownloadAvailability.ERROR
+                else -> previous?.state ?: DownloadAvailability.MISSING
+            },
+            downloadedEver = downloaded || previous?.downloadedEver == true,
+            localPath = relativePath ?: previous?.localPath,
+            size = chapterDir?.size() ?: previous?.size ?: 0L,
+            checksum = chapterDir?.let(::fingerprintUniFile) ?: previous?.checksum,
+            downloadedAt = if (downloaded) previous?.downloadedAt ?: now else previous?.downloadedAt,
+            lastVerifiedAt = if (chapterDir != null) now else previous?.lastVerifiedAt,
+            chapterId = download.chapter.id.toString(),
+            sourceNamespace = sourceNamespace,
+            canonicalId = canonicalId,
+        )
         kirohaDatabaseRepository.upsertDownload(record)
         appendKirohaDownloadEvent(previous, record)
     }
@@ -958,28 +978,32 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             listOf(
                 animeDownloadProvider.getSourceDirName(download.source),
                 animeDownloadProvider.getAnimeDirName(download.anime.title),
-                animeDownloadProvider.getEpisodeDirName(download.episode.name, download.episode.scanlator, download.episode.url),
+                animeDownloadProvider.getEpisodeDirName(
+                    download.episode.name,
+                    download.episode.scanlator,
+                    download.episode.url,
+                ),
             ).joinToString("/")
         }
         val record = DownloadRecord(
-                itemId = itemId,
-                deviceId = deviceId,
-                storageId = activeDownloadStorageId(),
-                state = when {
-                    downloaded && episodeDir != null -> DownloadAvailability.AVAILABLE_LOCAL
-                    download.status == AnimeDownload.State.ERROR -> DownloadAvailability.ERROR
-                    else -> previous?.state ?: DownloadAvailability.MISSING
-                },
-                downloadedEver = downloaded || previous?.downloadedEver == true,
-                localPath = relativePath ?: previous?.localPath,
-                size = episodeDir?.size() ?: previous?.size ?: 0L,
-                checksum = episodeDir?.let(::fingerprintUniFile) ?: previous?.checksum,
-                downloadedAt = if (downloaded) previous?.downloadedAt ?: now else previous?.downloadedAt,
-                lastVerifiedAt = if (episodeDir != null) now else previous?.lastVerifiedAt,
-                chapterId = download.episode.id.toString(),
-                sourceNamespace = sourceNamespace,
-                canonicalId = canonicalId,
-            )
+            itemId = itemId,
+            deviceId = deviceId,
+            storageId = activeDownloadStorageId(),
+            state = when {
+                downloaded && episodeDir != null -> DownloadAvailability.AVAILABLE_LOCAL
+                download.status == AnimeDownload.State.ERROR -> DownloadAvailability.ERROR
+                else -> previous?.state ?: DownloadAvailability.MISSING
+            },
+            downloadedEver = downloaded || previous?.downloadedEver == true,
+            localPath = relativePath ?: previous?.localPath,
+            size = episodeDir?.size() ?: previous?.size ?: 0L,
+            checksum = episodeDir?.let(::fingerprintUniFile) ?: previous?.checksum,
+            downloadedAt = if (downloaded) previous?.downloadedAt ?: now else previous?.downloadedAt,
+            lastVerifiedAt = if (episodeDir != null) now else previous?.lastVerifiedAt,
+            chapterId = download.episode.id.toString(),
+            sourceNamespace = sourceNamespace,
+            canonicalId = canonicalId,
+        )
         kirohaDatabaseRepository.upsertDownload(record)
         appendKirohaDownloadEvent(previous, record)
     }
@@ -992,17 +1016,30 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         val device = DeviceRegistry(AndroidKeyValueStore(this)).load() ?: return
         val now = System.currentTimeMillis()
         val event = SyncEvent(
-                eventId = "", entity = SyncEntity.DOWNLOAD, entityId = record.itemId,
-                operation = if (record.state == DownloadAvailability.DELETED) SyncOperation.DELETE else SyncOperation.UPSERT,
-                revision = now, timestamp = now, deviceId = device.deviceId,
-                payload = listOf(
-                    "itemId=${record.itemId}", "state=${record.state.name}",
-                    "downloadedEver=${record.downloadedEver}", "size=${record.size}",
-                    "lastVerifiedAt=${record.lastVerifiedAt ?: now}",
-                    "storageLabel=${record.storageId}", "sourceNamespace=${record.sourceNamespace ?: ""}",
-                    "canonicalId=${record.canonicalId ?: ""}",
-                ).joinToString(";") ,
-            )
+            eventId = "",
+            entity = SyncEntity.DOWNLOAD,
+            entityId = record.itemId,
+            operation = if (record.state ==
+                DownloadAvailability.DELETED
+            ) {
+                SyncOperation.DELETE
+            } else {
+                SyncOperation.UPSERT
+            },
+            revision = now,
+            timestamp = now,
+            deviceId = device.deviceId,
+            payload = listOf(
+                "itemId=${record.itemId}",
+                "state=${record.state.name}",
+                "downloadedEver=${record.downloadedEver}",
+                "size=${record.size}",
+                "lastVerifiedAt=${record.lastVerifiedAt ?: now}",
+                "storageLabel=${record.storageId}",
+                "sourceNamespace=${record.sourceNamespace ?: ""}",
+                "canonicalId=${record.canonicalId ?: ""}",
+            ).joinToString(";"),
+        )
         val persisted = LocalSyncJournal(AndroidKeyValueStore(this)).append(event)
         kirohaDatabaseRepository.insertEvent(persisted)
         KirohaSyncJob.enqueueDebounced(this)
@@ -1013,8 +1050,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // Previously the recorder hashed only file names/sizes, while reindex also
         // hashed metadata and content, marking legitimate completed copies as ERROR.
         fun totalSize(current: UniFile): Long =
-            if (current.isDirectory) current.listFiles().orEmpty().sumOf(::totalSize)
-            else current.length().coerceAtLeast(0L)
+            if (current.isDirectory) {
+                current.listFiles().orEmpty().sumOf(::totalSize)
+            } else {
+                current.length().coerceAtLeast(0L)
+            }
 
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update("${totalSize(file)}:${file.lastModified()}".toByteArray())

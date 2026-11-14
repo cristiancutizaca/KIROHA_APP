@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Notifications
@@ -33,11 +34,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
 import dev.zacsweers.metrox.viewmodel.metroViewModel
@@ -85,8 +87,9 @@ fun HomeFeedScreen(
     val scope = rememberCoroutineScope()
     val navigator = LocalNavigator.current
     val model = screenModel
-    val state by model.state.collectAsState()
-    var selectedMediaType by remember { mutableStateOf(MediaType.ALL) }
+    val state by model.state.collectAsStateWithLifecycle()
+    var selectedMediaType by rememberSaveable { mutableStateOf(MediaType.ALL) }
+    val listState = rememberLazyListState()
     var showSettingsDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -183,13 +186,14 @@ fun HomeFeedScreen(
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = modifier
                         .fillMaxSize()
                         .padding(padding),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     // 1. Chips de Filtro Horizontal (Todo, Películas, Series, Anime, Manga)
-                    item {
+                    item(key = "filters") {
                         MediaFormatFilterChips(
                             selectedMediaType = selectedMediaType,
                             onMediaTypeSelected = { selectedMediaType = it },
@@ -203,7 +207,7 @@ fun HomeFeedScreen(
                         state.heroList.filter { it.mediaType == selectedMediaType }
                     }
                     if (state.showFeatured && filteredHeroList.isNotEmpty()) {
-                        item {
+                        item(key = "featured") {
                             HeroMediaCarousel(
                                 heroList = filteredHeroList,
                                 onItemClick = onContinueItemClick,
@@ -215,7 +219,7 @@ fun HomeFeedScreen(
 
                     // 3. Sección "Continuar viendo y leyendo"
                     if (state.showContinue && state.continueList.isNotEmpty()) {
-                        item {
+                        item(key = "continue") {
                             SectionHeader(title = stringResource(MR.strings.label_continue_watching_reading))
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -245,7 +249,7 @@ fun HomeFeedScreen(
 
                     // 4. Sección Inteligente "Porque viste / leíste [Título]..."
                     if (state.showBecauseYouWatched && state.becauseYouWatchedTitle != null) {
-                        item {
+                        item(key = "related") {
                             val headerText = if (state.becauseYouWatchedIsAnime) {
                                 stringResource(MR.strings.because_you_watched, state.becauseYouWatchedTitle!!)
                             } else {
@@ -263,7 +267,7 @@ fun HomeFeedScreen(
 
                     // 5. Sección "Recomendados para ti"
                     if (state.showRecommended) {
-                        item {
+                        item(key = "recommended") {
                             HomeFeedSection(
                                 title = stringResource(MR.strings.label_recommended_for_you),
                                 items = state.recommendedList,
@@ -276,7 +280,7 @@ fun HomeFeedScreen(
 
                     // 6. Sección "Películas populares" (TMDB)
                     if (state.showPopularMovies) {
-                        item {
+                        item(key = "movies") {
                             HomeFeedSection(
                                 title = stringResource(MR.strings.label_popular_movies),
                                 items = state.movieList,
@@ -289,7 +293,7 @@ fun HomeFeedScreen(
 
                     // 7. Sección "Series populares" (TMDB)
                     if (state.showPopularSeries) {
-                        item {
+                        item(key = "series") {
                             HomeFeedSection(
                                 title = stringResource(MR.strings.label_popular_series),
                                 items = state.seriesList,
@@ -302,7 +306,7 @@ fun HomeFeedScreen(
 
                     // 8. Sección "Anime populares"
                     if (state.showPopularAnime) {
-                        item {
+                        item(key = "anime") {
                             HomeFeedSection(
                                 title = stringResource(MR.strings.label_popular_anime),
                                 items = state.animeList,
@@ -315,7 +319,7 @@ fun HomeFeedScreen(
 
                     // 9. Sección "Manga populares"
                     if (state.showPopularManga) {
-                        item {
+                        item(key = "manga") {
                             HomeFeedSection(
                                 title = stringResource(MR.strings.label_popular_manga),
                                 items = state.mangaList,

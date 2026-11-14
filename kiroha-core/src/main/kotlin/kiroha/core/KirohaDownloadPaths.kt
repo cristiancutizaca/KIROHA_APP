@@ -9,7 +9,13 @@ import java.security.MessageDigest
  * Never use local SQL row IDs: backup/restore and library sync may renumber them.
  */
 object KirohaDownloadPaths {
-    private val sourceStorageIdSuffix = Regex("__s_[0-9]+$")
+    private const val HEX_DIGITS = "0123456789abcdef"
+    private val sourceStorageIdSuffix = Regex("__s_-?[0-9]+$")
+    private val mangaIdentitySuffix = Regex("__k_[0-9a-f]{16}$")
+
+    fun hasSourceIdentity(folderName: String): Boolean = sourceStorageIdSuffix.containsMatchIn(folderName)
+
+    fun hasMangaIdentity(folderName: String): Boolean = mangaIdentitySuffix.containsMatchIn(folderName)
 
     /**
      * Source folder aliases are read locations, not manga identities.
@@ -47,7 +53,13 @@ object KirohaDownloadPaths {
         val raw = "$sourceId\u0000$canonicalMangaUrl"
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(raw.toByteArray(Charsets.UTF_8))
-        val hex = digest.joinToString("") { "%02x".format(it) }
-        return "__k_" + hex.take(16)
+        return buildString(20) {
+            append("__k_")
+            for (index in 0 until 8) {
+                val byte = digest[index].toInt() and 0xff
+                append(HEX_DIGITS[byte ushr 4])
+                append(HEX_DIGITS[byte and 0x0f])
+            }
+        }
     }
 }

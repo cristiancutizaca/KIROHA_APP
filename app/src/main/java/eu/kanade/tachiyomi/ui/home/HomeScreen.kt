@@ -27,6 +27,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -98,9 +99,9 @@ object HomeScreen : Screen() {
         val preferences = context.appGraph.preferenceStore
         val castManager = remember { CastManager(activity!!, preferences) }
 
-        LaunchedEffect(Unit) {
-            castManager.startDeviceDiscovery()
+        DisposableEffect(castManager) {
             castManager.reconnect()
+            onDispose { castManager.cleanup() }
         }
 
         val showHomeTab by uiPreferences.showHomeTab.collectAsState()
