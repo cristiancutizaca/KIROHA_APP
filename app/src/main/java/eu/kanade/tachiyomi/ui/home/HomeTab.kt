@@ -54,9 +54,13 @@ data object HomeTab : Tab {
 
     @Composable
     override fun Content() {
-        val owner = LocalActivity.current as? ViewModelStoreOwner ?: LocalViewModelStoreOwner.current
-        CompositionLocalProvider(LocalViewModelStoreOwner provides owner) {
+        val owner = LocalActivity.current as? ViewModelStoreOwner
+        if (owner == null) {
             HomeFeedScreen()
+        } else {
+            CompositionLocalProvider(LocalViewModelStoreOwner provides owner) {
+                HomeFeedScreen()
+            }
         }
     }
 }
