@@ -13,19 +13,24 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.home.HomeItemData
 import eu.kanade.presentation.home.MediaType
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.entries.anime.interactor.GetAnime
@@ -47,6 +52,7 @@ import tachiyomi.domain.track.manga.interactor.GetMangaTracks
 import tachiyomi.source.local.entries.anime.isLocal
 import tachiyomi.source.local.entries.manga.isLocal
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 enum class HomeMediaFilter {
     ALL,
@@ -126,24 +132,22 @@ class HomeFeedScreenModel(
     private val remoteMangaState = MutableStateFlow<List<HomeItemData>>(emptyList())
     private val remoteMovieSeriesState = MutableStateFlow<List<HomeItemData>>(emptyList())
 
+    private val feedUpdates = Channel<Unit>(Channel.CONFLATED)
+    private var shuffleSeed = Random.nextInt()
+    private var remoteTrendsJob: Job? = null
+
     init {
+        viewModelScope.launch {
+            feedUpdates.receiveAsFlow().debounce(100L).collectLatest { buildHomeState() }
+        }
         observeHomeData()
         fetchRemoteTrendsAsync()
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            _state.update { current ->
-                val newShuffledRecs = current.recommendedList.shuffled()
-                current.copy(
-                    isRefreshing = true,
-                    recommendedList = newShuffledRecs,
-                )
-            }
-            fetchRemoteTrendsAsync()
-            delay(600L)
-            _state.update { it.copy(isRefreshing = false) }
-        }
+        shuffleSeed = Random.nextInt()
+        updateStateWithData()
+        fetchRemoteTrendsAsync(showRefreshIndicator = true)
     }
 
     fun toggleSection(key: String) {
@@ -207,9 +211,25 @@ class HomeFeedScreenModel(
         fetchRemoteTrendsAsync()
     }
 
-    private fun fetchRemoteTrendsAsync() {
+    private fun fetchRemoteTrendsAsync(showRefreshIndicator: Boolean = false) {
+        remoteTrendsJob?.cancel()
+        _state.update { it.copy(isRefreshing = it.isRefreshing || showRefreshIndicator) }
+        remoteTrendsJob = viewModelScope.launch {
+            try {
+                fetchRemoteTrends()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            }
+            _state.update { it.copy(isRefreshing = false) }
+        }
+    }
+
+    private suspend fun fetchRemoteTrends() = coroutineScope {
+        if (HeroSource.entries.getOrNull(uiPreferences.homeHeroSource.get()) == HeroSource.LIBRARY_ONLY) {
+            return@coroutineScope
+        }
         // 1. Tendencias de AniList (Anime)
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             try {
                 if (!uiPreferences.homeEnableAnilist.get()) {
                     remoteAnimeState.value = emptyList()
@@ -238,13 +258,15 @@ class HomeFeedScreenModel(
                 }
                 remoteAnimeState.value = animeItems
                 android.util.Log.d("HomeFeedDebug", "remoteAnimeState updated with ${animeItems.size} items")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 android.util.Log.e("HomeFeedDebug", "Failed to fetch AniList popular anime", e)
             }
         }
 
         // 2. Tendencias de AniList (Manga)
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             try {
                 if (!uiPreferences.homeEnableAnilist.get()) {
                     remoteMangaState.value = emptyList()
@@ -269,13 +291,15 @@ class HomeFeedScreenModel(
                 }
                 remoteMangaState.value = mangaItems
                 android.util.Log.d("HomeFeedDebug", "remoteMangaState updated with ${mangaItems.size} items")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 android.util.Log.e("HomeFeedDebug", "Failed to fetch AniList popular manga", e)
             }
         }
 
         // 3. Tendencias de TMDB (Películas y Series)
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             try {
                 if (!uiPreferences.homeEnableTmdb.get()) {
                     remoteMovieSeriesState.value = emptyList()
@@ -306,6 +330,8 @@ class HomeFeedScreenModel(
                                 genres = "Película, Cine, Movie",
                             )
                         }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (e: Exception) {
                         android.util.Log.e("HomeFeedDebug", "Failed to fetch TMDB movies", e)
                         emptyList()
@@ -329,6 +355,8 @@ class HomeFeedScreenModel(
                                 genres = "Serie, TV, Show",
                             )
                         }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (e: Exception) {
                         android.util.Log.e("HomeFeedDebug", "Failed to fetch TMDB series", e)
                         emptyList()
@@ -342,6 +370,8 @@ class HomeFeedScreenModel(
                 } else {
                     android.util.Log.w("HomeFeedDebug", "TMDB skipped: not logged in and not available for use")
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 android.util.Log.e("HomeFeedDebug", "Critical error in TMDB fetch coroutine", e)
             }
@@ -350,8 +380,6 @@ class HomeFeedScreenModel(
 
     private fun observeHomeData() {
         android.util.Log.d("HomeFeedDebug", "observeHomeData: initializing observers...")
-        // Set loading false immediately — UI is always interactive
-        _state.update { it.copy(isLoading = false) }
 
         // Observe uiPreferences changes so UI state updates instantly in real time
         viewModelScope.launch {
@@ -387,6 +415,7 @@ class HomeFeedScreenModel(
         viewModelScope.launch {
             try {
                 trackPreferences.trackApiKey(trackerManager.tmdb as eu.kanade.tachiyomi.data.track.Tracker).changes()
+                    .drop(1)
                     .catch { e -> android.util.Log.e("HomeFeedDebug", "Error observing TMDB API key", e) }
                     .collect {
                         android.util.Log.d("HomeFeedDebug", "TMDB key changed, refetching trends")
@@ -401,6 +430,7 @@ class HomeFeedScreenModel(
         viewModelScope.launch {
             try {
                 getLibraryAnime.subscribe()
+                    .distinctUntilChanged()
                     .catch { e -> android.util.Log.e("HomeFeedDebug", "Error observing library anime", e) }
                     .collect { libraryAnimeList ->
                         android.util.Log.d("HomeFeedDebug", "Library anime collected: size=${libraryAnimeList.size}")
@@ -415,6 +445,7 @@ class HomeFeedScreenModel(
         viewModelScope.launch {
             try {
                 getLibraryManga.subscribe()
+                    .distinctUntilChanged()
                     .catch { e -> android.util.Log.e("HomeFeedDebug", "Error observing library manga", e) }
                     .collect { libraryMangaList ->
                         android.util.Log.d("HomeFeedDebug", "Library manga collected: size=${libraryMangaList.size}")
@@ -429,6 +460,7 @@ class HomeFeedScreenModel(
         viewModelScope.launch {
             try {
                 getAnimeHistory.subscribe("")
+                    .distinctUntilChanged()
                     .catch { e -> android.util.Log.e("HomeFeedDebug", "Error observing anime history", e) }
                     .collect { histories ->
                         android.util.Log.d("HomeFeedDebug", "Anime history collected: size=${histories.size}")
@@ -443,6 +475,7 @@ class HomeFeedScreenModel(
         viewModelScope.launch {
             try {
                 getMangaHistory.subscribe("")
+                    .distinctUntilChanged()
                     .catch { e -> android.util.Log.e("HomeFeedDebug", "Error observing manga history", e) }
                     .collect { histories ->
                         android.util.Log.d("HomeFeedDebug", "Manga history collected: size=${histories.size}")
@@ -490,7 +523,6 @@ class HomeFeedScreenModel(
         }
     }
 
-    @Synchronized
     private fun updateStateWithData(
         libraryAnime: List<LibraryAnime>? = null,
         libraryManga: List<LibraryManga>? = null,
@@ -509,369 +541,403 @@ class HomeFeedScreenModel(
         if (remoteManga != null) cachedRemoteManga = remoteManga
         if (remoteMovieSeries != null) cachedRemoteMovieSeries = remoteMovieSeries
 
+        feedUpdates.trySend(Unit)
+    }
+
+    private suspend fun buildHomeState() {
+        val libraryAnimeList = cachedLibraryAnime
+        val libraryMangaList = cachedLibraryManga
+        val animeHistories = cachedAnimeHistory
+        val mangaHistories = cachedMangaHistory
+        val rawRemoteAnime = cachedRemoteAnime
+        val rawRemoteManga = cachedRemoteManga
+        val movieSeriesList = cachedRemoteMovieSeries
+        val seed = shuffleSeed
+
         try {
-            val libraryAnimeList = cachedLibraryAnime
-            val libraryMangaList = cachedLibraryManga
-            val animeHistories = cachedAnimeHistory
-            val mangaHistories = cachedMangaHistory
-            val rawRemoteAnime = cachedRemoteAnime
-            val rawRemoteManga = cachedRemoteManga
-            val movieSeriesList = cachedRemoteMovieSeries
-
-            // Read preferences synchronously
-            val filter = HomeMediaFilter.entries.getOrElse(uiPreferences.homeMediaFilter.get()) { HomeMediaFilter.ALL }
-            val heroSource = HeroSource.entries.getOrElse(uiPreferences.homeHeroSource.get()) { HeroSource.BOTH }
-            val limit = uiPreferences.homeItemsPerSection.get()
-            val hideCompleted = uiPreferences.homeHideCompleted.get()
-            val autoScrollHero = uiPreferences.homeAutoScrollHero.get()
-
-            val showFeatured = uiPreferences.homeShowFeatured.get()
-            val showContinue = uiPreferences.homeShowContinue.get()
-            val showBecauseYouWatched = uiPreferences.homeShowBecauseYouWatched.get()
-            val showRecommended = uiPreferences.homeShowRecommended.get()
-            val showPopularAnime = uiPreferences.homeShowPopularAnime.get()
-            val showPopularManga = uiPreferences.homeShowPopularManga.get()
-            val showPopularMovies = uiPreferences.homeShowPopularMovies.get()
-            val showPopularSeries = uiPreferences.homeShowPopularSeries.get()
-
-            val enableTmdb = uiPreferences.homeEnableTmdb.get()
-            val enableAnilist = uiPreferences.homeEnableAnilist.get()
-
-            val pinnedAnimeSources = sourcePreferences.pinnedAnimeSources.get()
-            val pinnedMangaSources = sourcePreferences.pinnedMangaSources.get()
-
-            val animeMap = libraryAnimeList.associateBy { it.anime.id }
-
-            logcat(LogPriority.DEBUG) {
-                "HomeFeed update: remoteAnime=${rawRemoteAnime.size}, remoteManga=${rawRemoteManga.size}, " +
-                    "remoteMovies=${movieSeriesList.size}, animeHistory=${animeHistories.size}, " +
-                    "mangaHistory=${mangaHistories.size}, libraryAnime=${libraryAnimeList.size}, " +
-                    "libraryManga=${libraryMangaList.size}"
-            }
-
-            // 1. Continue Watching (Anime)
-            val continueAnime = if (filter != HomeMediaFilter.MANGA_ONLY) {
-                animeHistories.map { relation ->
-                    val epNum = if (relation.episodeNumber % 1.0 == 0.0) {
-                        relation.episodeNumber.toInt().toString()
-                    } else {
-                        relation.episodeNumber.toString()
-                    }
-
-                    val libAnime = animeMap[relation.animeId]?.anime
-                    val realSourceName = libAnime?.source?.let { sourceManager.getOrStub(it).name } ?: ""
-
-                    val classifiedType = classifyMedia(
-                        title = relation.title,
-                        genre = libAnime?.genre,
-                        description = libAnime?.description,
-                        sourceName = realSourceName,
-                    )
-
-                    val subtitleText = when (classifiedType) {
-                        MediaType.MOVIES -> "Película"
-                        MediaType.SERIES -> "Serie • Ep. $epNum"
-                        else -> "Episodio $epNum"
-                    }
-
-                    HomeItemData(
-                        id = relation.animeId,
-                        isAnime = true,
-                        inLibrary = true,
-                        episodeId = relation.episodeId,
-                        title = relation.title,
-                        subtitle = subtitleText,
-                        coverData = relation.coverData,
-                        mediaType = classifiedType,
-                        progress = 0.5f,
-                        remainingInfo = "Ep. $epNum",
-                        synopsis = libAnime?.description ?: relation.title,
-                        genres = libAnime?.genre?.joinToString(", ") ?: "",
-                        lastUpdatedTimestamp = relation.seenAt?.time ?: 0L,
-                    )
-                }
-            } else {
-                emptyList()
-            }
-
-            // 2. Continue Reading (Manga)
-            val continueManga = if (filter != HomeMediaFilter.VIDEO_ONLY) {
-                mangaHistories.map { relation ->
-                    val chNum = if (relation.chapterNumber % 1.0 == 0.0) {
-                        relation.chapterNumber.toInt().toString()
-                    } else {
-                        relation.chapterNumber.toString()
-                    }
-
-                    HomeItemData(
-                        id = relation.mangaId,
-                        isAnime = false,
-                        inLibrary = true,
-                        chapterId = relation.chapterId,
-                        title = relation.title,
-                        subtitle = "Capítulo $chNum",
-                        coverData = relation.coverData,
-                        mediaType = MediaType.MANGA,
-                        progress = 0.8f,
-                        remainingInfo = "Cap. $chNum",
-                        synopsis = relation.title,
-                        lastUpdatedTimestamp = relation.readAt?.time ?: 0L,
-                    )
-                }
-            } else {
-                emptyList()
-            }
-
-            val unifiedContinue = (continueAnime + continueManga)
-                .sortedByDescending { it.lastUpdatedTimestamp }
-                .take(20)
-
-            // 3. Library lists
-            val nonLocalAnime = if (filter != HomeMediaFilter.MANGA_ONLY) {
-                libraryAnimeList.filterNot { it.anime.isLocal() }
-            } else {
-                emptyList()
-            }
-            val nonLocalManga = if (filter != HomeMediaFilter.VIDEO_ONLY) {
-                libraryMangaList.filterNot { it.manga.isLocal() }
-            } else {
-                emptyList()
-            }
-
-            val pinnedAnimeList = nonLocalAnime.filter { "${it.anime.source}" in pinnedAnimeSources }
-            val sourceAnimeList = if (pinnedAnimeList.isNotEmpty()) pinnedAnimeList else nonLocalAnime
-
-            val pinnedMangaList = nonLocalManga.filter { "${it.manga.source}" in pinnedMangaSources }
-            val sourceMangaList = if (pinnedMangaList.isNotEmpty()) pinnedMangaList else nonLocalManga
-
-            val animeItems = sourceAnimeList.map { lib ->
-                val anime = lib.anime
-                val realSourceName = sourceManager.getOrStub(anime.source).name
-
-                val mediaType = classifyMedia(
-                    title = anime.title,
-                    genre = anime.genre,
-                    description = anime.description,
-                    sourceName = realSourceName,
-                )
-
-                HomeItemData(
-                    id = anime.id,
-                    isAnime = true,
-                    inLibrary = true,
-                    title = anime.title,
-                    subtitle = anime.genre?.firstOrNull() ?: mediaType.name,
-                    coverData = anime.asAnimeCover(),
-                    mediaType = mediaType,
-                    rating = "",
-                    synopsis = anime.description ?: anime.title,
-                    genres = anime.genre?.joinToString(", ") ?: "",
+            val next = withContext(Dispatchers.Default) {
+                buildHomeState(
+                    libraryAnimeList,
+                    libraryMangaList,
+                    animeHistories,
+                    mangaHistories,
+                    rawRemoteAnime,
+                    rawRemoteManga,
+                    movieSeriesList,
+                    seed,
                 )
             }
-
-            val mangaItems = sourceMangaList.map { lib ->
-                val manga = lib.manga
-                HomeItemData(
-                    id = manga.id,
-                    isAnime = false,
-                    inLibrary = true,
-                    title = manga.title,
-                    subtitle = manga.genre?.firstOrNull() ?: "Manga",
-                    coverData = manga.asMangaCover(),
-                    mediaType = MediaType.MANGA,
-                    rating = "",
-                    synopsis = manga.description ?: manga.title,
-                    genres = manga.genre?.joinToString(", ") ?: "",
-                )
-            }
-
-            // Cross-reference remote items with local library
-            val animeTitleMap = libraryAnimeList.associateBy { it.anime.title.lowercase().trim() }
-            val processedRemoteAnime = rawRemoteAnime.map { item ->
-                val match = animeTitleMap[item.title.lowercase().trim()]
-                if (match != null) {
-                    item.copy(
-                        id = match.anime.id,
-                        inLibrary = true,
-                        coverData = match.anime.asAnimeCover(),
-                        genres = match.anime.genre?.joinToString(", ") ?: item.genres,
-                    )
-                } else {
-                    item
-                }
-            }
-
-            val mangaTitleMap = libraryMangaList.associateBy { it.manga.title.lowercase().trim() }
-            val processedRemoteManga = rawRemoteManga.map { item ->
-                val match = mangaTitleMap[item.title.lowercase().trim()]
-                if (match != null) {
-                    item.copy(
-                        id = match.manga.id,
-                        inLibrary = true,
-                        coverData = match.manga.asMangaCover(),
-                        genres = match.manga.genre?.joinToString(", ") ?: item.genres,
-                    )
-                } else {
-                    item
-                }
-            }
-
-            val finalPopularAnime = when (heroSource) {
-                HeroSource.LIBRARY_ONLY -> animeItems.filter { it.mediaType == MediaType.ANIME }
-
-                HeroSource.TRACKERS_ONLY -> processedRemoteAnime
-
-                HeroSource.BOTH -> processedRemoteAnime.ifEmpty {
-                    animeItems.filter { it.mediaType == MediaType.ANIME }
-                }
-            }
-
-            val finalPopularManga = when (heroSource) {
-                HeroSource.LIBRARY_ONLY -> mangaItems
-                HeroSource.TRACKERS_ONLY -> processedRemoteManga
-                HeroSource.BOTH -> processedRemoteManga.ifEmpty { mangaItems }
-            }
-
-            val movieItems = when (heroSource) {
-                HeroSource.LIBRARY_ONLY -> animeItems.filter { it.mediaType == MediaType.MOVIES }
-
-                HeroSource.TRACKERS_ONLY -> movieSeriesList.filter { it.mediaType == MediaType.MOVIES }
-
-                HeroSource.BOTH -> movieSeriesList.filter { it.mediaType == MediaType.MOVIES }.ifEmpty {
-                    animeItems.filter {
-                        it.mediaType ==
-                            MediaType.MOVIES
-                    }
-                }
-            }
-
-            val seriesItems = when (heroSource) {
-                HeroSource.LIBRARY_ONLY -> animeItems.filter { it.mediaType == MediaType.SERIES }
-
-                HeroSource.TRACKERS_ONLY -> movieSeriesList.filter { it.mediaType == MediaType.SERIES }
-
-                HeroSource.BOTH -> movieSeriesList.filter { it.mediaType == MediaType.SERIES }.ifEmpty {
-                    animeItems.filter {
-                        it.mediaType ==
-                            MediaType.SERIES
-                    }
-                }
-            }
-
-            val displayPopularAnime = if (filter != HomeMediaFilter.MANGA_ONLY) finalPopularAnime else emptyList()
-            val displayPopularManga = if (filter != HomeMediaFilter.VIDEO_ONLY) finalPopularManga else emptyList()
-            val displayPopularMovies = if (filter != HomeMediaFilter.MANGA_ONLY) movieItems else emptyList()
-            val displayPopularSeries = if (filter != HomeMediaFilter.MANGA_ONLY) seriesItems else emptyList()
-
-            // 4. "Because you watched"
-            val lastInteractedItem = unifiedContinue.firstOrNull()
-            val targetGenres =
-                lastInteractedItem?.genres?.split(",")?.map { it.trim().lowercase() }?.filter { it.isNotBlank() }
-                    ?: emptyList()
-
-            val candidatePool = when (heroSource) {
-                HeroSource.LIBRARY_ONLY -> (animeItems + mangaItems)
-
-                HeroSource.TRACKERS_ONLY -> (processedRemoteAnime + processedRemoteManga + movieSeriesList)
-
-                HeroSource.BOTH -> (
-                    processedRemoteAnime + processedRemoteManga + movieSeriesList + animeItems +
-                        mangaItems
-                    )
-            }
-                .distinctBy { "${it.mediaType.name}_${it.id}_${it.title.lowercase().trim()}" }
-
-            val becauseYouWatchedList = if (lastInteractedItem != null && targetGenres.isNotEmpty()) {
-                candidatePool
-                    .filter { item ->
-                        item.id != lastInteractedItem.id &&
-                            item.title.lowercase().trim() != lastInteractedItem.title.lowercase().trim() &&
-                            item.genres.split(",").any { g -> g.trim().lowercase() in targetGenres } &&
-                            (!hideCompleted || item.progress < 1.0f)
-                    }
-            } else {
-                emptyList()
-            }
-
-            val filteredRecs = candidatePool
-                .filter { !hideCompleted || it.progress < 1.0f }
-            val unifiedRecommended = filteredRecs.shuffled()
-
-            val displayBecauseYouWatched = when (filter) {
-                HomeMediaFilter.VIDEO_ONLY -> becauseYouWatchedList.filter { it.mediaType != MediaType.MANGA }
-                HomeMediaFilter.MANGA_ONLY -> becauseYouWatchedList.filter { it.mediaType == MediaType.MANGA }
-                HomeMediaFilter.ALL -> becauseYouWatchedList
-            }
-
-            val displayRecommended = when (filter) {
-                HomeMediaFilter.VIDEO_ONLY -> unifiedRecommended.filter { it.mediaType != MediaType.MANGA }
-                HomeMediaFilter.MANGA_ONLY -> unifiedRecommended.filter { it.mediaType == MediaType.MANGA }
-                HomeMediaFilter.ALL -> unifiedRecommended
-            }
-
-            val allRemoteHeroItems = if (movieSeriesList.isNotEmpty()) {
-                (
-                    movieSeriesList.shuffled().take(
-                        4,
-                    ) + (processedRemoteAnime + processedRemoteManga).shuffled().take(3)
-                    ).shuffled()
-            } else {
-                (processedRemoteAnime + processedRemoteManga).shuffled()
-            }
-            val videoItems = animeItems.filter { it.mediaType != MediaType.MANGA }
-            val fallbackCarousel = if (videoItems.isNotEmpty()) {
-                videoItems.distinctBy { it.id }.take(7)
-            } else {
-                animeItems.distinctBy { it.id }.take(7)
-            }
-
-            val currentHeroList = when (heroSource) {
-                HeroSource.LIBRARY_ONLY -> fallbackCarousel
-                HeroSource.TRACKERS_ONLY -> allRemoteHeroItems
-                HeroSource.BOTH -> allRemoteHeroItems.ifEmpty { fallbackCarousel }
-            }
-
-            android.util.Log.d(
-                "HomeFeedDebug",
-                "HomeFeed State build: heroList=${currentHeroList.size}, " +
-                    "allRemoteHero=${allRemoteHeroItems.size}, fallback=${fallbackCarousel.size}, " +
-                    "remoteAnime=${processedRemoteAnime.size}, remoteManga=${processedRemoteManga.size}, " +
-                    "movies=${movieItems.size}, series=${seriesItems.size}, " +
-                    "heroSource=$heroSource",
-            )
-
-            _state.value = State(
-                isLoading = false,
-                isRefreshing = false,
-                heroList = currentHeroList,
-                continueList = unifiedContinue,
-                becauseYouWatchedTitle = lastInteractedItem?.title,
-                becauseYouWatchedIsAnime = lastInteractedItem?.isAnime ?: true,
-                becauseYouWatchedList = displayBecauseYouWatched,
-                recommendedList = displayRecommended,
-                animeList = displayPopularAnime.take(limit),
-                mangaList = displayPopularManga.take(limit),
-                movieList = displayPopularMovies.take(limit),
-                seriesList = displayPopularSeries.take(limit),
-                showFeatured = showFeatured,
-                showContinue = showContinue,
-                showBecauseYouWatched = showBecauseYouWatched,
-                showRecommended = showRecommended,
-                showPopularAnime = showPopularAnime,
-                showPopularManga = showPopularManga,
-                showPopularMovies = showPopularMovies,
-                showPopularSeries = showPopularSeries,
-                mediaFilter = filter,
-                autoScrollHero = autoScrollHero,
-                heroSource = heroSource,
-                itemsPerSection = limit,
-                hideCompletedInRecommended = hideCompleted,
-                enableTmdb = enableTmdb,
-                enableAnilist = enableAnilist,
-            )
+            _state.update { next.copy(isRefreshing = it.isRefreshing) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             android.util.Log.e("HomeFeedDebug", "Error building home feed state", e)
         }
+    }
+
+    private fun buildHomeState(
+        libraryAnimeList: List<LibraryAnime>,
+        libraryMangaList: List<LibraryManga>,
+        animeHistories: List<AnimeHistoryWithRelations>,
+        mangaHistories: List<MangaHistoryWithRelations>,
+        rawRemoteAnime: List<HomeItemData>,
+        rawRemoteManga: List<HomeItemData>,
+        movieSeriesList: List<HomeItemData>,
+        seed: Int,
+    ): State {
+        val random = Random(seed)
+        // Read preferences from the worker along with the saved data snapshot.
+        val filter = HomeMediaFilter.entries.getOrElse(uiPreferences.homeMediaFilter.get()) { HomeMediaFilter.ALL }
+        val heroSource = HeroSource.entries.getOrElse(uiPreferences.homeHeroSource.get()) { HeroSource.BOTH }
+        val limit = uiPreferences.homeItemsPerSection.get()
+        val hideCompleted = uiPreferences.homeHideCompleted.get()
+        val autoScrollHero = uiPreferences.homeAutoScrollHero.get()
+
+        val showFeatured = uiPreferences.homeShowFeatured.get()
+        val showContinue = uiPreferences.homeShowContinue.get()
+        val showBecauseYouWatched = uiPreferences.homeShowBecauseYouWatched.get()
+        val showRecommended = uiPreferences.homeShowRecommended.get()
+        val showPopularAnime = uiPreferences.homeShowPopularAnime.get()
+        val showPopularManga = uiPreferences.homeShowPopularManga.get()
+        val showPopularMovies = uiPreferences.homeShowPopularMovies.get()
+        val showPopularSeries = uiPreferences.homeShowPopularSeries.get()
+
+        val enableTmdb = uiPreferences.homeEnableTmdb.get()
+        val enableAnilist = uiPreferences.homeEnableAnilist.get()
+
+        val pinnedAnimeSources = sourcePreferences.pinnedAnimeSources.get()
+        val pinnedMangaSources = sourcePreferences.pinnedMangaSources.get()
+
+        val animeMap = libraryAnimeList.associateBy { it.anime.id }
+
+        logcat(LogPriority.DEBUG) {
+            "HomeFeed update: remoteAnime=${rawRemoteAnime.size}, remoteManga=${rawRemoteManga.size}, " +
+                "remoteMovies=${movieSeriesList.size}, animeHistory=${animeHistories.size}, " +
+                "mangaHistory=${mangaHistories.size}, libraryAnime=${libraryAnimeList.size}, " +
+                "libraryManga=${libraryMangaList.size}"
+        }
+
+        // 1. Continue Watching (Anime)
+        val continueAnime = if (filter != HomeMediaFilter.MANGA_ONLY) {
+            animeHistories.map { relation ->
+                val epNum = if (relation.episodeNumber % 1.0 == 0.0) {
+                    relation.episodeNumber.toInt().toString()
+                } else {
+                    relation.episodeNumber.toString()
+                }
+
+                val libAnime = animeMap[relation.animeId]?.anime
+                val realSourceName = libAnime?.source?.let { sourceManager.getOrStub(it).name } ?: ""
+
+                val classifiedType = classifyMedia(
+                    title = relation.title,
+                    genre = libAnime?.genre,
+                    description = libAnime?.description,
+                    sourceName = realSourceName,
+                )
+
+                val subtitleText = when (classifiedType) {
+                    MediaType.MOVIES -> "Película"
+                    MediaType.SERIES -> "Serie • Ep. $epNum"
+                    else -> "Episodio $epNum"
+                }
+
+                HomeItemData(
+                    id = relation.animeId,
+                    isAnime = true,
+                    inLibrary = true,
+                    episodeId = relation.episodeId,
+                    title = relation.title,
+                    subtitle = subtitleText,
+                    coverData = relation.coverData,
+                    mediaType = classifiedType,
+                    progress = 0.5f,
+                    remainingInfo = "Ep. $epNum",
+                    synopsis = libAnime?.description ?: relation.title,
+                    genres = libAnime?.genre?.joinToString(", ") ?: "",
+                    lastUpdatedTimestamp = relation.seenAt?.time ?: 0L,
+                )
+            }
+        } else {
+            emptyList()
+        }
+
+        // 2. Continue Reading (Manga)
+        val continueManga = if (filter != HomeMediaFilter.VIDEO_ONLY) {
+            mangaHistories.map { relation ->
+                val chNum = if (relation.chapterNumber % 1.0 == 0.0) {
+                    relation.chapterNumber.toInt().toString()
+                } else {
+                    relation.chapterNumber.toString()
+                }
+
+                HomeItemData(
+                    id = relation.mangaId,
+                    isAnime = false,
+                    inLibrary = true,
+                    chapterId = relation.chapterId,
+                    title = relation.title,
+                    subtitle = "Capítulo $chNum",
+                    coverData = relation.coverData,
+                    mediaType = MediaType.MANGA,
+                    progress = 0.8f,
+                    remainingInfo = "Cap. $chNum",
+                    synopsis = relation.title,
+                    lastUpdatedTimestamp = relation.readAt?.time ?: 0L,
+                )
+            }
+        } else {
+            emptyList()
+        }
+
+        val unifiedContinue = (continueAnime + continueManga)
+            .sortedByDescending { it.lastUpdatedTimestamp }
+            .take(20)
+
+        // 3. Library lists
+        val nonLocalAnime = if (filter != HomeMediaFilter.MANGA_ONLY) {
+            libraryAnimeList.filterNot { it.anime.isLocal() }
+        } else {
+            emptyList()
+        }
+        val nonLocalManga = if (filter != HomeMediaFilter.VIDEO_ONLY) {
+            libraryMangaList.filterNot { it.manga.isLocal() }
+        } else {
+            emptyList()
+        }
+
+        val pinnedAnimeList = nonLocalAnime.filter { "${it.anime.source}" in pinnedAnimeSources }
+        val sourceAnimeList = if (pinnedAnimeList.isNotEmpty()) pinnedAnimeList else nonLocalAnime
+
+        val pinnedMangaList = nonLocalManga.filter { "${it.manga.source}" in pinnedMangaSources }
+        val sourceMangaList = if (pinnedMangaList.isNotEmpty()) pinnedMangaList else nonLocalManga
+
+        val animeItems = sourceAnimeList.map { lib ->
+            val anime = lib.anime
+            val realSourceName = sourceManager.getOrStub(anime.source).name
+
+            val mediaType = classifyMedia(
+                title = anime.title,
+                genre = anime.genre,
+                description = anime.description,
+                sourceName = realSourceName,
+            )
+
+            HomeItemData(
+                id = anime.id,
+                isAnime = true,
+                inLibrary = true,
+                title = anime.title,
+                subtitle = anime.genre?.firstOrNull() ?: mediaType.name,
+                coverData = anime.asAnimeCover(),
+                mediaType = mediaType,
+                rating = "",
+                synopsis = anime.description ?: anime.title,
+                genres = anime.genre?.joinToString(", ") ?: "",
+            )
+        }
+
+        val mangaItems = sourceMangaList.map { lib ->
+            val manga = lib.manga
+            HomeItemData(
+                id = manga.id,
+                isAnime = false,
+                inLibrary = true,
+                title = manga.title,
+                subtitle = manga.genre?.firstOrNull() ?: "Manga",
+                coverData = manga.asMangaCover(),
+                mediaType = MediaType.MANGA,
+                rating = "",
+                synopsis = manga.description ?: manga.title,
+                genres = manga.genre?.joinToString(", ") ?: "",
+            )
+        }
+
+        // Cross-reference remote items with local library
+        val animeTitleMap = libraryAnimeList.associateBy { it.anime.title.lowercase().trim() }
+        val processedRemoteAnime = rawRemoteAnime.map { item ->
+            val match = animeTitleMap[item.title.lowercase().trim()]
+            if (match != null) {
+                item.copy(
+                    id = match.anime.id,
+                    inLibrary = true,
+                    coverData = match.anime.asAnimeCover(),
+                    genres = match.anime.genre?.joinToString(", ") ?: item.genres,
+                )
+            } else {
+                item
+            }
+        }
+
+        val mangaTitleMap = libraryMangaList.associateBy { it.manga.title.lowercase().trim() }
+        val processedRemoteManga = rawRemoteManga.map { item ->
+            val match = mangaTitleMap[item.title.lowercase().trim()]
+            if (match != null) {
+                item.copy(
+                    id = match.manga.id,
+                    inLibrary = true,
+                    coverData = match.manga.asMangaCover(),
+                    genres = match.manga.genre?.joinToString(", ") ?: item.genres,
+                )
+            } else {
+                item
+            }
+        }
+
+        val finalPopularAnime = when (heroSource) {
+            HeroSource.LIBRARY_ONLY -> animeItems.filter { it.mediaType == MediaType.ANIME }
+
+            HeroSource.TRACKERS_ONLY -> processedRemoteAnime
+
+            HeroSource.BOTH -> processedRemoteAnime.ifEmpty {
+                animeItems.filter { it.mediaType == MediaType.ANIME }
+            }
+        }
+
+        val finalPopularManga = when (heroSource) {
+            HeroSource.LIBRARY_ONLY -> mangaItems
+            HeroSource.TRACKERS_ONLY -> processedRemoteManga
+            HeroSource.BOTH -> processedRemoteManga.ifEmpty { mangaItems }
+        }
+
+        val movieItems = when (heroSource) {
+            HeroSource.LIBRARY_ONLY -> animeItems.filter { it.mediaType == MediaType.MOVIES }
+
+            HeroSource.TRACKERS_ONLY -> movieSeriesList.filter { it.mediaType == MediaType.MOVIES }
+
+            HeroSource.BOTH -> movieSeriesList.filter { it.mediaType == MediaType.MOVIES }.ifEmpty {
+                animeItems.filter {
+                    it.mediaType ==
+                        MediaType.MOVIES
+                }
+            }
+        }
+
+        val seriesItems = when (heroSource) {
+            HeroSource.LIBRARY_ONLY -> animeItems.filter { it.mediaType == MediaType.SERIES }
+
+            HeroSource.TRACKERS_ONLY -> movieSeriesList.filter { it.mediaType == MediaType.SERIES }
+
+            HeroSource.BOTH -> movieSeriesList.filter { it.mediaType == MediaType.SERIES }.ifEmpty {
+                animeItems.filter {
+                    it.mediaType ==
+                        MediaType.SERIES
+                }
+            }
+        }
+
+        val displayPopularAnime = if (filter != HomeMediaFilter.MANGA_ONLY) finalPopularAnime else emptyList()
+        val displayPopularManga = if (filter != HomeMediaFilter.VIDEO_ONLY) finalPopularManga else emptyList()
+        val displayPopularMovies = if (filter != HomeMediaFilter.MANGA_ONLY) movieItems else emptyList()
+        val displayPopularSeries = if (filter != HomeMediaFilter.MANGA_ONLY) seriesItems else emptyList()
+
+        // 4. "Because you watched"
+        val lastInteractedItem = unifiedContinue.firstOrNull()
+        val targetGenres =
+            lastInteractedItem?.genres?.split(",")?.map { it.trim().lowercase() }?.filter { it.isNotBlank() }
+                ?: emptyList()
+
+        val candidatePool = when (heroSource) {
+            HeroSource.LIBRARY_ONLY -> (animeItems + mangaItems)
+
+            HeroSource.TRACKERS_ONLY -> (processedRemoteAnime + processedRemoteManga + movieSeriesList)
+
+            HeroSource.BOTH -> (
+                processedRemoteAnime + processedRemoteManga + movieSeriesList + animeItems +
+                    mangaItems
+                )
+        }
+            .distinctBy { "${it.mediaType.name}_${it.id}_${it.title.lowercase().trim()}" }
+
+        val becauseYouWatchedList = if (showBecauseYouWatched && lastInteractedItem != null &&
+            targetGenres.isNotEmpty()
+        ) {
+            candidatePool
+                .filter { item ->
+                    item.id != lastInteractedItem.id &&
+                        item.title.lowercase().trim() != lastInteractedItem.title.lowercase().trim() &&
+                        item.genres.split(",").any { g -> g.trim().lowercase() in targetGenres } &&
+                        (!hideCompleted || item.progress < 1.0f)
+                }
+        } else {
+            emptyList()
+        }
+
+        val filteredRecs = candidatePool
+            .filter { !hideCompleted || it.progress < 1.0f }
+        val unifiedRecommended = if (showRecommended) filteredRecs.shuffled(Random(seed)) else emptyList()
+
+        val displayBecauseYouWatched = when (filter) {
+            HomeMediaFilter.VIDEO_ONLY -> becauseYouWatchedList.filter { it.mediaType != MediaType.MANGA }
+            HomeMediaFilter.MANGA_ONLY -> becauseYouWatchedList.filter { it.mediaType == MediaType.MANGA }
+            HomeMediaFilter.ALL -> becauseYouWatchedList
+        }
+
+        val displayRecommended = when (filter) {
+            HomeMediaFilter.VIDEO_ONLY -> unifiedRecommended.filter { it.mediaType != MediaType.MANGA }
+            HomeMediaFilter.MANGA_ONLY -> unifiedRecommended.filter { it.mediaType == MediaType.MANGA }
+            HomeMediaFilter.ALL -> unifiedRecommended
+        }
+
+        val allRemoteHeroItems = if (movieSeriesList.isNotEmpty()) {
+            (
+                movieSeriesList.shuffled(random).take(
+                    4,
+                ) + (processedRemoteAnime + processedRemoteManga).shuffled(random).take(3)
+                ).shuffled(random)
+        } else {
+            (processedRemoteAnime + processedRemoteManga).shuffled(random)
+        }
+        val videoItems = animeItems.filter { it.mediaType != MediaType.MANGA }
+        val fallbackCarousel = if (videoItems.isNotEmpty()) {
+            videoItems.distinctBy { it.id }.take(7)
+        } else {
+            animeItems.distinctBy { it.id }.take(7)
+        }
+
+        val currentHeroList = when (heroSource) {
+            HeroSource.LIBRARY_ONLY -> fallbackCarousel
+            HeroSource.TRACKERS_ONLY -> allRemoteHeroItems
+            HeroSource.BOTH -> allRemoteHeroItems.ifEmpty { fallbackCarousel }
+        }
+
+        android.util.Log.d(
+            "HomeFeedDebug",
+            "HomeFeed State build: heroList=${currentHeroList.size}, " +
+                "allRemoteHero=${allRemoteHeroItems.size}, fallback=${fallbackCarousel.size}, " +
+                "remoteAnime=${processedRemoteAnime.size}, remoteManga=${processedRemoteManga.size}, " +
+                "movies=${movieItems.size}, series=${seriesItems.size}, " +
+                "heroSource=$heroSource",
+        )
+
+        return State(
+            isLoading = false,
+            heroList = currentHeroList,
+            continueList = unifiedContinue,
+            becauseYouWatchedTitle = lastInteractedItem?.title,
+            becauseYouWatchedIsAnime = lastInteractedItem?.isAnime ?: true,
+            becauseYouWatchedList = displayBecauseYouWatched,
+            recommendedList = displayRecommended,
+            animeList = displayPopularAnime.take(limit),
+            mangaList = displayPopularManga.take(limit),
+            movieList = displayPopularMovies.take(limit),
+            seriesList = displayPopularSeries.take(limit),
+            showFeatured = showFeatured,
+            showContinue = showContinue,
+            showBecauseYouWatched = showBecauseYouWatched,
+            showRecommended = showRecommended,
+            showPopularAnime = showPopularAnime,
+            showPopularManga = showPopularManga,
+            showPopularMovies = showPopularMovies,
+            showPopularSeries = showPopularSeries,
+            mediaFilter = filter,
+            autoScrollHero = autoScrollHero,
+            heroSource = heroSource,
+            itemsPerSection = limit,
+            hideCompletedInRecommended = hideCompleted,
+            enableTmdb = enableTmdb,
+            enableAnilist = enableAnilist,
+        )
     }
 
     private fun classifyMedia(

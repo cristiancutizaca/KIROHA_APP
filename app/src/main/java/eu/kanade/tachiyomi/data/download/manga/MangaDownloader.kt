@@ -236,7 +236,13 @@ class MangaDownloader(
                         // The previous per-source limit multiplied by five sources, causing
                         // up to 25 simultaneous chapter jobs (each fetching multiple pages).
                         // Enforce one global cap to reduce CPU, network and thermal load.
-                        .take(minOf(downloadPreferences.numberOfDownloads.get().coerceIn(1, 5), thermalChapterLimit(), MAX_CONCURRENT_CHAPTERS))
+                        .take(
+                            minOf(
+                                downloadPreferences.numberOfDownloads.get().coerceIn(1, 5),
+                                thermalChapterLimit(),
+                                MAX_CONCURRENT_CHAPTERS,
+                            ),
+                        )
                     emit(activeDownloads)
 
                     if (activeDownloads.isEmpty()) break
@@ -321,7 +327,17 @@ class MangaDownloader(
         val chaptersToQueue = chapters.asSequence()
             .filter { it.id !in queuedChapterIds }
             // Check disk only for chapters not already in the queue.
-            .filter { provider.findChapterDir(it.name, it.scanlator, it.url, manga.title, source, manga.url) == null }
+            .filter {
+                provider.findChapterDir(
+                    it.name,
+                    it.scanlator,
+                    it.url,
+                    manga.title,
+                    source,
+                    manga.url,
+                    checkLegacy = false,
+                ) == null
+            }
             // Add chapters to queue from the start.
             .sortedByDescending { it.sourceOrder }
             .map { MangaDownload(source, manga, it) }
@@ -777,7 +793,9 @@ class MangaDownloader(
         store.remove(download)
         if (download.status == MangaDownload.State.DOWNLOADING ||
             download.status == MangaDownload.State.QUEUE
-        ) download.status = MangaDownload.State.NOT_DOWNLOADED
+        ) {
+            download.status = MangaDownload.State.NOT_DOWNLOADED
+        }
         _queueState.update { current -> current - download }
     }
 
@@ -788,7 +806,9 @@ class MangaDownloader(
         downloads.forEach { download ->
             if (download.status == MangaDownload.State.DOWNLOADING ||
                 download.status == MangaDownload.State.QUEUE
-            ) download.status = MangaDownload.State.NOT_DOWNLOADED
+            ) {
+                download.status = MangaDownload.State.NOT_DOWNLOADED
+            }
         }
         val removed = downloads.toSet()
         _queueState.update { current -> current.filterNot { it in removed } }
@@ -809,7 +829,9 @@ class MangaDownloader(
         previous.forEach { download ->
             if (download.status == MangaDownload.State.DOWNLOADING ||
                 download.status == MangaDownload.State.QUEUE
-            ) download.status = MangaDownload.State.NOT_DOWNLOADED
+            ) {
+                download.status = MangaDownload.State.NOT_DOWNLOADED
+            }
         }
         _queueState.value = emptyList()
     }

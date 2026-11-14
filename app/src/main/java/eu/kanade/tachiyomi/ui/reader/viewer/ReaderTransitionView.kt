@@ -38,9 +38,9 @@ class ReaderTransitionView @JvmOverloads constructor(context: Context, attrs: At
                             chapterName = goingToChapter.name,
                             chapterScanlator = goingToChapter.scanlator,
                             chapterUrl = goingToChapter.url,
-                            mangaTitle = manga.ogTitle,
+                            mangaTitle = manga.title,
                             sourceId = manga.source,
-                            skipCache = true,
+                            mangaUrl = manga.url,
                         )
                     } ?: false,
             )

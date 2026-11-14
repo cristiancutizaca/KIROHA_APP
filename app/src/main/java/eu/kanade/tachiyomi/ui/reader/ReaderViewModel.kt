@@ -32,15 +32,6 @@ import eu.kanade.tachiyomi.data.cache.MangaCoverCache
 import eu.kanade.tachiyomi.data.database.models.manga.toDomainChapter
 import eu.kanade.tachiyomi.data.download.manga.MangaDownloadCache
 import eu.kanade.tachiyomi.data.download.manga.MangaDownloadManager
-import eu.kanade.tachiyomi.data.download.manga.MangaDownloadProvider
-import tachiyomi.data.kiroha.KirohaDatabaseRepository
-import kiroha.core.AndroidKeyValueStore
-import kiroha.core.DeviceRegistry
-import kiroha.core.LocalSyncJournal
-import kiroha.core.ProgressKind
-import kiroha.core.SyncEntity
-import kiroha.core.SyncEvent
-import kiroha.core.SyncOperation
 import eu.kanade.tachiyomi.data.download.manga.model.MangaDownload
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
@@ -67,6 +58,13 @@ import eu.kanade.tachiyomi.util.lang.byteSize
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.storage.DiskUtil.MAX_FILE_NAME_BYTES
 import eu.kanade.tachiyomi.util.storage.cacheImageDir
+import kiroha.core.AndroidKeyValueStore
+import kiroha.core.DeviceRegistry
+import kiroha.core.LocalSyncJournal
+import kiroha.core.ProgressKind
+import kiroha.core.SyncEntity
+import kiroha.core.SyncEvent
+import kiroha.core.SyncOperation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -90,6 +88,7 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.data.kiroha.KirohaDatabaseRepository
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.entries.manga.interactor.GetManga
 import tachiyomi.domain.entries.manga.model.Manga
@@ -100,9 +99,9 @@ import tachiyomi.domain.items.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.items.chapter.interactor.UpdateChapter
 import tachiyomi.domain.items.chapter.model.ChapterUpdate
 import tachiyomi.domain.items.chapter.service.getChapterSort
-import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.source.manga.service.MangaSourceManager
+import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.source.local.entries.manga.isLocal
 import tachiyomi.source.local.image.manga.LocalMangaCoverManager
 import java.util.Date
@@ -118,7 +117,6 @@ class ReaderViewModel(
     private val context: Context,
     private val sourceManager: MangaSourceManager,
     private val downloadManager: MangaDownloadManager,
-    private val downloadProvider: MangaDownloadProvider,
     private val kirohaDatabaseRepository: KirohaDatabaseRepository,
     private val storageManager: StorageManager,
     private val imageSaver: ImageSaver,
@@ -359,7 +357,6 @@ class ReaderViewModel(
                     context = context,
                     scope = viewModelScope,
                     downloadManager = downloadManager,
-                    downloadProvider = downloadProvider,
                     kirohaDatabaseRepository = kirohaDatabaseRepository,
                     storageManager = storageManager,
                     chapterCache = chapterCache,
@@ -471,16 +468,9 @@ class ReaderViewModel(
 
         if (chapter.pageLoader?.isLocal == false) {
             val manga = manga ?: return
-            val dbChapter = chapter.chapter
-            val isDownloaded = downloadManager.isChapterDownloaded(
-                dbChapter.name,
-                dbChapter.scanlator,
-                dbChapter.url,
-                manga.title,
-                manga.source,
-                skipCache = true,
-                mangaUrl = manga.url,
-            )
+            val dbChapter = chapter.chapter.toDomainChapter() ?: return
+            val source = sourceManager.getOrStub(manga.source)
+            val isDownloaded = downloadManager.resolveChapterFile(manga, dbChapter, source) != null
             if (isDownloaded) {
                 chapter.state = ReaderChapter.State.Wait
             }
@@ -670,7 +660,9 @@ class ReaderViewModel(
                 revision = now,
                 timestamp = now,
                 deviceId = device.deviceId,
-                payload = "itemId=$itemId;chapterId=${chapter.id};canonicalId=${chapter.url};mangaUrl=${manga?.url};sourceNamespace=$sourceNamespace;position=$pageIndex;read=${chapter.read};kind=${ProgressKind.MANGA_PAGE}",
+                payload = "itemId=$itemId;chapterId=${chapter.id};canonicalId=${chapter.url};mangaUrl=${manga?.url};" +
+                    "sourceNamespace=$sourceNamespace;position=$pageIndex;read=${chapter.read};" +
+                    "kind=${ProgressKind.MANGA_PAGE}",
             ),
         )
         eu.kanade.tachiyomi.data.sync.KirohaSyncJob.enqueueDebounced(context)

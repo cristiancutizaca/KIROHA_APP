@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,8 +50,9 @@ fun CastSheet(
     var showQualityDialog by remember { mutableStateOf(false) }
     var showPlayerDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    DisposableEffect(castManager) {
         castManager.startDeviceDiscovery()
+        onDispose { castManager.stopDeviceDiscovery() }
     }
 
     LaunchedEffect(castState) {

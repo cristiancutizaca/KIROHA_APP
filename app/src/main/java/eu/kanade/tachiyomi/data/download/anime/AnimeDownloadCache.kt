@@ -341,6 +341,10 @@ class AnimeDownloadCache(
         notifyChanges()
     }
 
+    fun requestReindex() {
+        scope.launchIO { invalidateCache() }
+    }
+
     fun invalidateCache() {
         lastRenew = 0L
         renewalJob?.cancel()
@@ -402,8 +406,8 @@ class AnimeDownloadCache(
                                             when {
                                                 it.name?.endsWith(AnimeDownloader.TMP_DIR_SUFFIX) == true -> null
                                                 it.isDirectory -> it.name
-                                            it.isFile && it.extension == "mp4" -> it.nameWithoutExtension
-                                            it.isFile && it.extension == "mkv" -> it.nameWithoutExtension
+                                                it.isFile && it.extension == "mp4" -> it.nameWithoutExtension
+                                                it.isFile && it.extension == "mkv" -> it.nameWithoutExtension
                                                 else -> null
                                             }
                                         }
