@@ -13,7 +13,10 @@ object KirohaDownloadPaths {
     private val sourceStorageIdSuffix = Regex("__s_-?[0-9]+$")
     private val mangaIdentitySuffix = Regex("__k_[0-9a-f]{16}$")
 
-    fun hasSourceIdentity(folderName: String): Boolean = sourceStorageIdSuffix.containsMatchIn(folderName)
+    fun sourceFolderId(folderName: String): Long? =
+        sourceStorageIdSuffix.find(folderName)?.value?.removePrefix("__s_")?.toLongOrNull()
+
+    fun hasSourceIdentity(folderName: String): Boolean = sourceFolderId(folderName) != null
 
     fun hasMangaIdentity(folderName: String): Boolean = mangaIdentitySuffix.containsMatchIn(folderName)
 

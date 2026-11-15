@@ -1,11 +1,14 @@
 package eu.kanade.presentation.library.manga
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +37,7 @@ fun MangaLibraryContent(
     contentPadding: PaddingValues,
     currentPage: () -> Int,
     hasActiveFilters: Boolean,
+    checkingDownloads: Boolean,
     showPageTabs: Boolean,
     onChangeCurrentPage: (Int) -> Unit,
     onMangaClicked: (Long) -> Unit,
@@ -54,7 +58,7 @@ fun MangaLibraryContent(
             end = contentPadding.calculateEndPadding(LocalLayoutDirection.current),
         ),
     ) {
-        val coercedCurrentPage = remember { currentPage().coerceIn(0, categories.lastIndex) }
+        val coercedCurrentPage = remember { currentPage().coerceIn(0, categories.lastIndex.coerceAtLeast(0)) }
         val pagerState = rememberPagerState(coercedCurrentPage) { categories.size }
 
         val scope = rememberCoroutineScope()
@@ -63,7 +67,7 @@ fun MangaLibraryContent(
         if (showPageTabs && categories.size > 1) {
             LaunchedEffect(categories) {
                 if (categories.size <= pagerState.currentPage) {
-                    pagerState.scrollToPage(categories.size - 1)
+                    pagerState.scrollToPage(categories.lastIndex)
                 }
             }
             LibraryTabs(
@@ -85,7 +89,7 @@ fun MangaLibraryContent(
         PullRefresh(
             refreshing = isRefreshing,
             onRefresh = {
-                val started = onRefresh(categories[currentPage()])
+                val started = onRefresh(categories.getOrNull(pagerState.currentPage))
                 if (!started) return@PullRefresh
                 scope.launch {
                     // Fake refresh status but hide it after a second as it's a long running task
@@ -96,20 +100,26 @@ fun MangaLibraryContent(
             },
             enabled = notSelectionMode,
         ) {
-            MangaLibraryPager(
-                state = pagerState,
-                contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
-                hasActiveFilters = hasActiveFilters,
-                selectedManga = selection,
-                searchQuery = searchQuery,
-                onGlobalSearchClicked = onGlobalSearchClicked,
-                getDisplayMode = getDisplayMode,
-                getColumnsForOrientation = getColumnsForOrientation,
-                getLibraryForPage = getLibraryForPage,
-                onClickManga = onClickManga,
-                onLongClickManga = onToggleRangeSelection,
-                onClickContinueReading = onContinueReadingClicked,
-            )
+            Box {
+                MangaLibraryPager(
+                    state = pagerState,
+                    contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+                    hasActiveFilters = hasActiveFilters,
+                    checkingDownloads = checkingDownloads,
+                    selectedManga = selection,
+                    searchQuery = searchQuery,
+                    onGlobalSearchClicked = onGlobalSearchClicked,
+                    getDisplayMode = getDisplayMode,
+                    getColumnsForOrientation = getColumnsForOrientation,
+                    getLibraryForPage = getLibraryForPage,
+                    onClickManga = onClickManga,
+                    onLongClickManga = onToggleRangeSelection,
+                    onClickContinueReading = onContinueReadingClicked,
+                )
+                if (checkingDownloads) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
         }
 
         LaunchedEffect(pagerState.currentPage) {

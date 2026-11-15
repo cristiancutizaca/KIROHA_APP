@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.download.manga
 
 import android.content.Context
+import android.net.Uri
 import android.util.AtomicFile
 import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
@@ -10,14 +11,15 @@ import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.extension.manga.MangaExtensionManager
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.util.size
-import kiroha.core.KirohaDownloadPaths
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,14 +57,14 @@ import tachiyomi.domain.entries.manga.model.Manga
 import tachiyomi.domain.entries.manga.repository.MangaRepository
 import tachiyomi.domain.items.chapter.model.Chapter
 import tachiyomi.domain.items.chapter.repository.ChapterRepository
+import tachiyomi.domain.library.manga.LibraryManga
 import tachiyomi.domain.source.manga.service.MangaSourceManager
 import tachiyomi.domain.storage.service.StorageManager
+import tachiyomi.source.local.entries.manga.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
@@ -85,7 +87,7 @@ class MangaDownloadCache(
     private val chapterRepository: ChapterRepository,
 ) {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _changes: Channel<Unit> = Channel(Channel.CONFLATED)
     val changes = _changes.receiveAsFlow()
         .onStart { emit(Unit) }
@@ -119,86 +121,31 @@ class MangaDownloadCache(
 
     @Volatile private var rootDownloadsDir = RootDirectory(null)
 
-    // Never guess legacy ownership from the visible title. Verify only individual
-    // chapters on Dispatchers.IO, serially, to avoid hammering the user's SD card.
-    private data class LegacyChapterKey(
-        val chapterName: String,
-        val chapterScanlator: String?,
-        val chapterUrl: String,
-        val mangaTitle: String,
-        val mangaUrl: String,
-        val sourceId: Long,
+    private data class LegacyMangaKey(val sourceId: Long, val mangaUrl: String) {
+        constructor(manga: Manga) : this(manga.source, manga.url)
+    }
+
+    private data class CachedLegacyManga(
+        val title: String,
+        val originalTitle: String,
+        val downloads: LegacyMangaDownloads,
     )
 
-    private data class LegacyMangaKey(val mangaUrl: String, val mangaTitle: String, val sourceId: Long)
+    private data class LibraryDownloadEntry(
+        val title: String,
+        val originalTitle: String,
+        val chapterCount: Long,
+        val chapterFetchedAt: Long,
+    )
 
-    private val legacyResults = ConcurrentHashMap<LegacyChapterKey, Boolean>()
-
-    // A search result may be checked before its manga/chapters are persisted.
-    // Retry negative matches later so opening that gallery can recover it.
-    private val legacyNegativeChecks = ConcurrentHashMap<LegacyChapterKey, Long>()
-    private data class LegacyChapters(val checkedAt: Long, val chapters: List<Chapter>)
-    private val legacyChapters = ConcurrentHashMap<LegacyMangaKey, LegacyChapters>()
-    private val requestedLegacyManga = ConcurrentHashMap.newKeySet<LegacyMangaKey>()
-    private var legacyMangaScanJob: Job? = null
-
-    // O(1) download counters for large libraries. Counting all chapter checks
-    // for every library card was quadratic as the positive cache grew.
-    private val legacyCounts = ConcurrentHashMap<LegacyMangaKey, AtomicInteger>()
-    private val legacyInFlight = ConcurrentHashMap.newKeySet<LegacyChapterKey>()
-    private val deferredLegacyChecks = ConcurrentLinkedQueue<LegacyChapterKey>()
-    private val deferredLegacyCount = AtomicInteger(0)
-    private val pendingLegacyChecks = AtomicInteger(0)
+    private val legacyScanner = LegacyMangaDownloadScanner(context, provider)
+    private val legacyDownloads = ConcurrentHashMap<LegacyMangaKey, CachedLegacyManga>()
+    private val legacyLookupRequests = Channel<LegacyMangaKey>(64)
+    private val legacyLookupInFlight = ConcurrentHashMap.newKeySet<LegacyMangaKey>()
+    private val legacyScanPermit = Semaphore(1)
     private val legacyGeneration = AtomicLong(0)
-    private val legacyProbeLimit = Semaphore(1)
-    private var legacyNotificationJob: Job? = null
-
-    // Old Aniyomi folders have no URL suffix. Keep the strict unique-owner
-    // rule for library entries, but also recover single-chapter galleries that
-    // the user opens directly from the source without favoriting 600+ items.
-    private data class LegacyLibraryKey(val sourceId: Long, val title: String)
-    private val legacyLibraryOwnerMutex = Mutex()
-
-    // Do not discard duplicate titles: ambiguity must block legacy recovery.
-    @Volatile private var legacyLibraryOwners: Map<LegacyLibraryKey, Set<String>>? = null
-
-    private suspend fun chapterCountForLegacyRecovery(key: LegacyChapterKey): Int? {
-        val favoriteOwners = legacyLibraryOwners ?: legacyLibraryOwnerMutex.withLock {
-            legacyLibraryOwners ?: mangaRepository.getMangaFavorites()
-                .groupBy { LegacyLibraryKey(it.source, it.title) }
-                .mapValues { (_, manga) -> manga.mapTo(mutableSetOf()) { it.url } }
-                .also { legacyLibraryOwners = it }
-        }
-        val owners = favoriteOwners[LegacyLibraryKey(key.sourceId, key.mangaTitle)].orEmpty()
-        val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: return null
-        if (manga.title != key.mangaTitle) return null
-        val mangaKey = LegacyMangaKey(key.mangaUrl, key.mangaTitle, key.sourceId)
-        val chapters = getLegacyChapters(mangaKey, manga.id)
-        val canRecover = KirohaDownloadPaths.permitsLegacyTitleRecovery(
-            favoriteOwnerUrls = owners,
-            mangaUrl = key.mangaUrl,
-            isFavorite = manga.favorite,
-            chapterCount = chapters.size,
-            matchingChapterCount = chapters.count { it.url == key.chapterUrl },
-        )
-        return chapters.size.takeIf { canRecover }
-    }
-
-    private suspend fun getLegacyChapters(key: LegacyMangaKey, mangaId: Long): List<Chapter> {
-        val now = System.currentTimeMillis()
-        legacyChapters[key]?.takeIf { now - it.checkedAt < LEGACY_NEGATIVE_RECHECK_MS }?.let {
-            return it.chapters
-        }
-        return chapterRepository.getChapterByMangaId(mangaId).also {
-            if (it.isNotEmpty()) legacyChapters[key] = LegacyChapters(now, it)
-        }
-    }
-
-    private companion object {
-        const val MAX_PENDING_LEGACY_CHECKS = 24
-        const val MAX_DEFERRED_LEGACY_CHECKS = 4096
-        const val LEGACY_NEGATIVE_RECHECK_MS = 60_000L
-    }
+    private var legacyLibraryRequest: Map<LegacyMangaKey, LibraryDownloadEntry>? = null
+    private var legacyLibraryScanJob: Job? = null
 
     init {
         // Attempt to read cache file
@@ -225,6 +172,26 @@ class MangaDownloadCache(
             } finally {
                 diskCacheReady.value = true
                 renewCache()
+            }
+        }
+
+        scope.launchIO {
+            for (key in legacyLookupRequests) {
+                try {
+                    extensionManager.isInitialized.first { it }
+                    sourceManager.isInitialized.first { it }
+                    val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: continue
+                    val source = sourceManager.getOrStub(key.sourceId)
+                    val generation = legacyGeneration.get()
+                    val refreshed = scanLegacyManga(manga, source)
+                    cacheLegacyResult(key, refreshed, generation)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    logcat(LogPriority.WARN, error) { "Could not check legacy manga downloads" }
+                } finally {
+                    legacyLookupInFlight.remove(key)
+                }
             }
         }
 
@@ -258,106 +225,39 @@ class MangaDownloadCache(
         mangaUrl: String? = null,
     ): Boolean {
         if (mangaUrl.isNullOrBlank()) return false
+        val key = LegacyMangaKey(sourceId, mangaUrl)
+        val cachedLegacy = legacyDownloads[key]?.takeIf { it.title == mangaTitle }?.downloads
         if (skipCache) {
             val source = sourceManager.getOrStub(sourceId)
-            return provider.findChapterDir(
+            val current = provider.findChapterDir(
                 chapterName,
                 chapterScanlator,
                 chapterUrl,
                 mangaTitle,
                 source,
                 mangaUrl,
-            ) != null
+            )
+            return current != null || cachedLegacy?.files?.get(chapterUrl)?.file?.exists() == true
         }
 
         renewCache()
-        val mangaDir = rootDownloadsDir.sourceDirs[sourceId]
-            ?.mangaDirs?.get(provider.getMangaDirName(mangaTitle, mangaUrl, sourceId))
-        if (mangaDir != null && provider.getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl)
-                .any { it in mangaDir.chapterDirs }
+        val current = getCurrentChapterNames(sourceId, mangaTitle, mangaUrl)
+        if (current.isNotEmpty() &&
+            provider.getValidChapterDirNames(chapterName, chapterScanlator, chapterUrl).any { it in current }
         ) {
             return true
         }
+        if (cachedLegacy?.files?.containsKey(chapterUrl) == true) return true
+        if (cachedLegacy != null && chapterUrl in cachedLegacy.chapterUrls) return false
 
-        // After a source's legacy folders have been indexed, most search results
-        // can be rejected in memory. Do not enqueue thousands of no-op SAF and
-        // database probes for titles that were never downloaded.
-        if (provider.isLegacyMangaTitleKnownAbsent(mangaTitle, sourceId)) return false
-
-        val key = LegacyChapterKey(chapterName, chapterScanlator, chapterUrl, mangaTitle, mangaUrl, sourceId)
-        legacyResults[key]?.let { cached ->
-            if (cached) return true
-            val lastChecked = legacyNegativeChecks[key] ?: 0L
-            if (System.currentTimeMillis() - lastChecked < LEGACY_NEGATIVE_RECHECK_MS) return false
-            legacyResults.remove(key, false)
-            legacyNegativeChecks.remove(key)
-        }
-
-        if (legacyInFlight.add(key)) {
-            // A library can present thousands of chapters at once. Avoid
-            // scheduling thousands of coroutines waiting on one SD card.
-            if (pendingLegacyChecks.incrementAndGet() > MAX_PENDING_LEGACY_CHECKS) {
-                pendingLegacyChecks.decrementAndGet()
-                // Don't silently lose all chapters beyond the first 24 visible.
-                // Keep a bounded, background-only queue and drain it as probes finish.
-                if (deferredLegacyCount.incrementAndGet() <= MAX_DEFERRED_LEGACY_CHECKS) {
-                    deferredLegacyChecks.offer(key)
-                } else {
-                    deferredLegacyCount.decrementAndGet()
-                    legacyInFlight.remove(key)
-                }
-                return false
-            }
-            val generation = legacyGeneration.get()
-            scope.launchIO {
-                try {
-                    // Extension sources must be initialized before trying to validate
-                    // ComicInfo chapter URLs. A stub must not cache a false result.
-                    extensionManager.isInitialized.first { it }
-                    sourceManager.isInitialized.first { it }
-                    if (generation != legacyGeneration.get()) return@launchIO
-                    val found = legacyProbeLimit.withPermit {
-                        val source = sourceManager.getOrStub(sourceId)
-                        findLegacyChapter(source, key) != null
-                    }
-                    if (generation != legacyGeneration.get()) return@launchIO
-                    val previous = legacyResults.put(key, found)
-                    if (found) {
-                        legacyNegativeChecks.remove(key)
-                        if (previous != true) {
-                            val mangaKey = LegacyMangaKey(key.mangaUrl, key.mangaTitle, key.sourceId)
-                            legacyCounts.computeIfAbsent(mangaKey) { AtomicInteger(0) }.incrementAndGet()
-                        }
-                        // Throttle instead of debounce: a long legacy scan must
-                        // update the UI periodically, not only after its last hit.
-                        if (legacyNotificationJob?.isActive != true) {
-                            legacyNotificationJob = scope.launchIO {
-                                delay(500L)
-                                _changes.send(Unit)
-                            }
-                        }
-                    } else {
-                        legacyNegativeChecks[key] = System.currentTimeMillis()
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    logcat(LogPriority.WARN, error) { "Legacy manga chapter validation failed" }
-                    if (generation == legacyGeneration.get()) {
-                        legacyResults[key] = false
-                        legacyNegativeChecks[key] = System.currentTimeMillis()
-                    }
-                } finally {
-                    legacyInFlight.remove(key)
-                    pendingLegacyChecks.decrementAndGet()
-                    scheduleNextDeferredLegacyCheck()
-                }
-            }
+        val mayHaveLegacy = cachedLegacy != null || !provider.isLegacyMangaTitleKnownAbsent(mangaTitle, sourceId)
+        if (mayHaveLegacy && legacyLookupInFlight.add(key)) {
+            if (legacyLookupRequests.trySend(key).isFailure) legacyLookupInFlight.remove(key)
         }
         return false
     }
 
-    /** Resolve a chapter opened before the background legacy checks have reached it. */
+    /** Resolve the local file even if the library has not finished indexing it yet. */
     suspend fun resolveChapterFile(manga: Manga, chapter: Chapter, source: MangaSource): UniFile? {
         val current = provider.findChapterDir(
             chapter.name,
@@ -366,136 +266,183 @@ class MangaDownloadCache(
             manga.title,
             source,
             manga.url,
-            checkLegacy = false,
         )
-        if (current != null || provider.isLegacyMangaTitleKnownAbsent(manga.title, source.id)) return current
+        if (current != null || manga.url.isBlank() || manga.isLocal()) return current
 
-        return legacyProbeLimit.withPermit {
-            findLegacyChapter(
-                source,
-                LegacyChapterKey(chapter.name, chapter.scanlator, chapter.url, manga.title, manga.url, source.id),
-            )
-        }
-    }
+        val key = LegacyMangaKey(manga)
+        val cached = legacyDownloads[key]?.takeIf { it.title == manga.title && it.originalTitle == manga.ogTitle }
+        val legacyFile = cached?.downloads?.files?.get(chapter.url)?.file
+        if (legacyFile?.exists() == true) return legacyFile
+        if (legacyFile == null && cached != null && chapter.url in cached.downloads.chapterUrls) return null
 
-    private suspend fun findLegacyChapter(source: MangaSource, key: LegacyChapterKey): UniFile? {
-        if (!provider.hasLegacyMangaTitleFolder(key.mangaTitle, source)) return null
-        val verified = provider.findVerifiedLegacyChapterDir(
-            key.chapterName,
-            key.chapterScanlator,
-            key.chapterUrl,
-            key.mangaTitle,
-            source,
-            key.mangaUrl,
-        )
-        if (verified != null) return verified
-
-        val count = chapterCountForLegacyRecovery(key) ?: return null
-        return provider.findUniqueLegacyChapterDir(
-            chapterName = key.chapterName,
-            chapterScanlator = key.chapterScanlator,
-            chapterUrl = key.chapterUrl,
-            mangaTitle = key.mangaTitle,
-            source = source,
-            mangaUrl = key.mangaUrl,
-            allowUnnamedSingleChapter = count == 1,
-        )
-    }
-
-    private fun scheduleNextDeferredLegacyCheck() {
         val generation = legacyGeneration.get()
-        val next = deferredLegacyChecks.poll() ?: return
-        deferredLegacyCount.decrementAndGet()
-        legacyInFlight.remove(next)
-        scope.launchIO {
-            // Avoid saturating SAF/microSD when a large library first opens.
-            delay(125L)
-            if (generation == legacyGeneration.get() && legacyResults[next] == null) {
-                isChapterDownloaded(
-                    chapterName = next.chapterName,
-                    chapterScanlator = next.chapterScanlator,
-                    chapterUrl = next.chapterUrl,
-                    mangaTitle = next.mangaTitle,
-                    sourceId = next.sourceId,
-                    skipCache = false,
-                    mangaUrl = next.mangaUrl,
-                )
-            }
+        val scanned = try {
+            scanLegacyManga(manga, source, chapter)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            logcat(LogPriority.WARN, error) { "Could not read an older manga download" }
+            return null
         }
-    }
-
-    /**
-     * Returns the amount of downloaded chapters.
-     */
-    fun getTotalDownloadCount(): Int {
-        renewCache()
-
-        val current = rootDownloadsDir.sourceDirs.values.sumOf { sourceDir ->
-            sourceDir.mangaDirs.values.sumOf { mangaDir ->
-                mangaDir.chapterDirs.size
-            }
-        }
-        // The namespaced index does not contain recovered legacy downloads.
-        return current + legacyCounts.values.sumOf { it.get() }
-    }
-
-    /**
-     * Returns the amount of downloaded chapters for a manga.
-     *
-     * @param manga the manga to check.
-     */
-    fun getDownloadCount(manga: Manga): Int {
-        renewCache()
-        val current = rootDownloadsDir.sourceDirs[manga.source]
-            ?.mangaDirs?.get(provider.getMangaDirName(manga.title, manga.url, manga.source))
-            ?.chapterDirs?.size ?: 0
-
-        val key = LegacyMangaKey(manga.url, manga.title, manga.source)
-        return current + (legacyCounts[key]?.get() ?: 0)
+        if (!cacheLegacyResult(key, scanned, generation)) return null
+        return scanned.downloads.files[chapter.url]?.file
     }
 
     @Synchronized
-    fun checkLegacyDownloads(mangas: List<Manga>) {
-        if (legacyMangaScanJob?.isActive == true) return
-        val generation = legacyGeneration.get()
-        legacyMangaScanJob = scope.launchIO {
-            try {
-                extensionManager.isInitialized.first { it }
-                sourceManager.isInitialized.first { it }
-                if (!provider.hasAnyLegacySourceFolder()) return@launchIO
-                for (manga in mangas) {
-                    ensureActive()
-                    if (generation != legacyGeneration.get()) break
-                    if (manga.url.isBlank() ||
-                        provider.isLegacyMangaTitleKnownAbsent(manga.title, manga.source)
-                    ) {
-                        continue
-                    }
-                    val key = LegacyMangaKey(manga.url, manga.title, manga.source)
-                    if (!requestedLegacyManga.add(key)) continue
-                    val source = sourceManager.getOrStub(manga.source)
-                    if (!provider.hasLegacyMangaTitleFolder(manga.title, source)) continue
-                    val chapters = getLegacyChapters(key, manga.id)
-                    for (chapter in chapters) {
-                        ensureActive()
-                        while (deferredLegacyCount.get() >= MAX_DEFERRED_LEGACY_CHECKS) {
-                            delay(250L)
+    private fun cacheLegacyResult(key: LegacyMangaKey, result: CachedLegacyManga, generation: Long): Boolean {
+        if (generation != legacyGeneration.get()) return false
+        if (legacyDownloads.put(key, result) != result) _changes.trySend(Unit)
+        return true
+    }
+
+    private suspend fun scanLegacyManga(
+        manga: Manga,
+        source: MangaSource,
+        openedChapter: Chapter? = null,
+    ): CachedLegacyManga = legacyScanPermit.withPermit {
+        val root = storageManager.getDownloadsDirectory()
+        val folders = root?.let { provider.findLegacyMangaFolders(it, manga, source) }.orEmpty()
+        if (root == null || folders.isEmpty()) {
+            val checked = setOfNotNull(openedChapter?.url)
+            return@withPermit CachedLegacyManga(
+                manga.title,
+                manga.ogTitle,
+                LegacyMangaDownloads(checked, emptyMap(), 0),
+            )
+        }
+
+        val knownChapters = chapterRepository.getChapterByMangaId(manga.id)
+        val chapters = if (openedChapter == null || knownChapters.any { it.url == openedChapter.url }) {
+            knownChapters
+        } else {
+            knownChapters + openedChapter
+        }
+        val ownership = if (manga.favorite || chapters.size == 1) {
+            val names = legacyTitles(manga)
+            val key = LegacyMangaKey(manga)
+            val otherOwners = mangaRepository.getMangaFavorites().asSequence()
+                .filter { LegacyMangaKey(it) != key && !it.isLocal() }
+                .filter { legacyTitles(it).any(names::contains) }
+                .flatMap { provider.findLegacyMangaFolders(root, it, sourceManager.getOrStub(it.source)) }
+                .mapTo(hashSetOf()) { it.uri }
+            folders.mapNotNullTo(hashSetOf()) { it.uri.takeUnless(otherOwners::contains) }
+        } else {
+            emptySet()
+        }
+        CachedLegacyManga(manga.title, manga.ogTitle, legacyScanner.scan(manga, source, chapters, folders, ownership))
+    }
+
+    private fun legacyTitles(manga: Manga): Set<String> =
+        provider.legacyTitleNames(manga.title) + provider.legacyTitleNames(manga.ogTitle)
+
+    private fun getCurrentChapterNames(sourceId: Long, title: String, mangaUrl: String): Set<String> {
+        val sourceDir = rootDownloadsDir.sourceDirs[sourceId] ?: return emptySet()
+        return sourceDir.mangaDirs[provider.getMangaDirName(title, mangaUrl, sourceId)]?.chapterDirs.orEmpty()
+    }
+
+    fun getTotalDownloadCount(): Int {
+        renewCache()
+        val current = rootDownloadsDir.sourceDirs.values.sumOf { sourceDir ->
+            sourceDir.mangaDirs.values.sumOf { it.chapterDirs.size }
+        }
+        return current + legacyDownloads.entries.sumOf { (key, entry) ->
+            val chapterNames = getCurrentChapterNames(key.sourceId, entry.title, key.mangaUrl)
+            entry.downloads.additionalCount(chapterNames.mapTo(hashSetOf()) { it.lowercase() })
+        }
+    }
+
+    fun getDownloadCount(manga: Manga): Int {
+        renewCache()
+        if (manga.url.isBlank()) return 0
+        val current = getCurrentChapterNames(manga.source, manga.title, manga.url)
+        val legacy = legacyDownloads[LegacyMangaKey(manga)]?.takeIf {
+            it.title == manga.title && it.originalTitle == manga.ogTitle
+        }?.downloads ?: return current.size
+        return current.size + legacy.additionalCount(current.mapTo(hashSetOf()) { it.lowercase() })
+    }
+
+    /**
+     * Inspect candidate folders once for a library version. The scanner can
+     * count owned files before a restored favorite has chapter rows.
+     */
+    @Synchronized
+    fun checkLegacyDownloads(library: List<LibraryManga>): Boolean {
+        val entries = library.asSequence().filter { !it.manga.isLocal() && it.manga.url.isNotBlank() }
+            .associateBy { LegacyMangaKey(it.manga) }
+        val request = entries.mapValues { (_, entry) ->
+            LibraryDownloadEntry(entry.manga.title, entry.manga.ogTitle, entry.totalChapters, entry.chapterFetchedAt)
+        }
+        if (request != legacyLibraryRequest) {
+            legacyLibraryRequest = request
+            legacyLibraryScanJob?.cancel()
+            val generation = legacyGeneration.get()
+            if (entries.isNotEmpty()) {
+                legacyLibraryScanJob = scope.launchIO {
+                    try {
+                        extensionManager.isInitialized.first { it }
+                        sourceManager.isInitialized.first { it }
+                        val scans = scanLegacyLibrary(entries.values.map { it.manga })
+                        synchronized(this@MangaDownloadCache) {
+                            if (generation == legacyGeneration.get() && legacyLibraryRequest === request) {
+                                val removedFavorites = legacyMatchesFromLibrary - request.keys
+                                for (key in removedFavorites) legacyDownloads.remove(key)
+                                for (key in request.keys) {
+                                    val entry = scans[key]
+                                    if (entry == null) legacyDownloads.remove(key) else legacyDownloads[key] = entry
+                                }
+                                legacyMatchesFromLibrary = scans.keys
+                            }
                         }
-                        isChapterDownloaded(
-                            chapter.name,
-                            chapter.scanlator,
-                            chapter.url,
-                            manga.title,
-                            manga.source,
-                            skipCache = false,
-                            mangaUrl = manga.url,
-                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        logcat(LogPriority.WARN, error) { "Could not index legacy library downloads" }
                     }
+                }.also { job -> job.invokeOnCompletion { _changes.trySend(Unit) } }
+            } else {
+                legacyMatchesFromLibrary.forEach(legacyDownloads::remove)
+                legacyMatchesFromLibrary = emptySet()
+                legacyLibraryScanJob = null
+            }
+        }
+        return legacyLibraryScanJob?.isActive == true || !diskCacheReady.value ||
+            (lastRenew == 0L && renewalJob?.isActive == true)
+    }
+
+    private var legacyMatchesFromLibrary: Set<LegacyMangaKey> = emptySet()
+
+    private suspend fun scanLegacyLibrary(mangas: List<Manga>): Map<LegacyMangaKey, CachedLegacyManga> {
+        val root = storageManager.getDownloadsDirectory() ?: return emptyMap()
+        val sources = mutableMapOf<Long, MangaSource>()
+        val work = mangas.mapNotNull { manga ->
+            currentCoroutineContext().ensureActive()
+            val source = sources.getOrPut(manga.source) { sourceManager.getOrStub(manga.source) }
+            val folders = provider.findLegacyMangaFolders(root, manga, source)
+            if (folders.isEmpty()) null else Triple(manga, source, folders)
+        }
+        val owners = mutableMapOf<Uri, MutableSet<LegacyMangaKey>>()
+        for ((manga, _, folders) in work) {
+            for (folder in folders) owners.getOrPut(folder.uri) { mutableSetOf() }.add(LegacyMangaKey(manga))
+        }
+
+        return buildMap {
+            for ((manga, source, folders) in work) {
+                currentCoroutineContext().ensureActive()
+                val key = LegacyMangaKey(manga)
+                val uniqueFolders = folders.mapNotNullTo(hashSetOf()) {
+                    it.uri.takeIf { uri -> owners[uri]?.singleOrNull() == key }
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                logcat(LogPriority.WARN, error) { "Could not check legacy downloads for library entries" }
+                try {
+                    val chapters = chapterRepository.getChapterByMangaId(manga.id)
+                    val downloads = legacyScanPermit.withPermit {
+                        legacyScanner.scan(manga, source, chapters, folders, uniqueFolders)
+                    }
+                    put(key, CachedLegacyManga(manga.title, manga.ogTitle, downloads))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    logcat(LogPriority.WARN, error) { "Could not check an older manga download folder" }
+                }
             }
         }
     }
@@ -567,11 +514,8 @@ class MangaDownloadCache(
         rootDownloadsDirMutex.withLock {
             val sourceDir = rootDownloadsDir.sourceDirs[manga.source] ?: return
             val mangaDir = sourceDir.mangaDirs[provider.getMangaDirName(manga.title, manga.url, manga.source)] ?: return
-            provider.getValidChapterDirNames(chapter.name, chapter.scanlator, chapter.url).forEach {
-                if (it in mangaDir.chapterDirs) {
-                    mangaDir.chapterDirs -= it
-                }
-            }
+            val names = provider.getValidChapterDirNames(chapter.name, chapter.scanlator, chapter.url).toSet()
+            mangaDir.chapterDirs -= names
         }
 
         notifyChanges()
@@ -587,13 +531,10 @@ class MangaDownloadCache(
         rootDownloadsDirMutex.withLock {
             val sourceDir = rootDownloadsDir.sourceDirs[manga.source] ?: return
             val mangaDir = sourceDir.mangaDirs[provider.getMangaDirName(manga.title, manga.url, manga.source)] ?: return
-            chapters.forEach { chapter ->
-                provider.getValidChapterDirNames(chapter.name, chapter.scanlator, chapter.url).forEach {
-                    if (it in mangaDir.chapterDirs) {
-                        mangaDir.chapterDirs -= it
-                    }
-                }
+            val names = chapters.flatMapTo(hashSetOf()) { chapter ->
+                provider.getValidChapterDirNames(chapter.name, chapter.scanlator, chapter.url)
             }
+            mangaDir.chapterDirs -= names
         }
 
         notifyChanges()
@@ -647,24 +588,17 @@ class MangaDownloadCache(
     @Synchronized
     fun invalidateCache() {
         legacyGeneration.incrementAndGet()
-        legacyResults.clear()
-        legacyNegativeChecks.clear()
-        legacyChapters.clear()
-        legacyMangaScanJob?.cancel()
-        requestedLegacyManga.clear()
-        legacyCounts.clear()
-        while (true) {
-            val deferred = deferredLegacyChecks.poll() ?: break
-            legacyInFlight.remove(deferred)
-            deferredLegacyCount.decrementAndGet()
-        }
-        legacyLibraryOwners = null
+        legacyDownloads.clear()
+        legacyLibraryScanJob?.cancel()
+        legacyLibraryRequest = null
+        legacyMatchesFromLibrary = emptySet()
         provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
         nextRenewAttempt = 0L
         renewalJob?.cancel()
         updateDiskCacheJob?.cancel()
         renewCache()
+        _changes.trySend(Unit)
     }
 
     /**
@@ -731,7 +665,7 @@ class MangaDownloadCache(
                                                 else -> null
                                             }
                                         }
-                                        .toMutableSet()
+                                        .toSet()
                                 }
                             }
                         }.awaitAll()
@@ -807,7 +741,7 @@ class MangaDownloadCache(
 private class RootDirectory(
     @Serializable(with = UniFileAsStringSerializer::class)
     val dir: UniFile?,
-    var sourceDirs: Map<Long, SourceDirectory> = mapOf(),
+    @Volatile var sourceDirs: Map<Long, SourceDirectory> = emptyMap(),
 )
 
 /**
@@ -817,7 +751,7 @@ private class RootDirectory(
 private class SourceDirectory(
     @Serializable(with = UniFileAsStringSerializer::class)
     val dir: UniFile?,
-    var mangaDirs: Map<String, MangaDirectory> = mapOf(),
+    @Volatile var mangaDirs: Map<String, MangaDirectory> = emptyMap(),
 )
 
 /**
@@ -827,7 +761,7 @@ private class SourceDirectory(
 private class MangaDirectory(
     @Serializable(with = UniFileAsStringSerializer::class)
     val dir: UniFile?,
-    var chapterDirs: MutableSet<String> = mutableSetOf(),
+    @Volatile var chapterDirs: Set<String> = emptySet(),
 )
 
 private object UniFileAsStringSerializer : KSerializer<UniFile?> {
