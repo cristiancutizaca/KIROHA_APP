@@ -42,17 +42,19 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.runningFold
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import mihon.domain.library.model.search.QueryNode
@@ -122,15 +124,19 @@ class MangaLibraryViewModel(
     // Database flows still refresh it reactively after returning from the reader.
     private companion object {
         @Volatile
-        var lastRenderedLibrary: MangaLibraryMap? = null
+        var lastRenderedLibrary: RenderedLibrary? = null
     }
 
     val state: StateFlow<MangaLibraryViewModel.State>
-        field = MutableStateFlow<MangaLibraryViewModel.State>(
-            State(
-                isLoading = lastRenderedLibrary == null,
-                library = lastRenderedLibrary ?: emptyMap(),
-            ),
+        field = MutableStateFlow(
+            lastRenderedLibrary?.let {
+                State(
+                    isLoading = false,
+                    library = it.library,
+                    isLibraryEmpty = it.isLibraryEmpty,
+                    hasActiveFilters = it.hasActiveFilters,
+                )
+            } ?: State(),
         )
 
     var activeCategoryIndex: Int by libraryPreferences.lastUsedCategory.asState(
@@ -138,48 +144,54 @@ class MangaLibraryViewModel(
     )
 
     init {
+        val itemPreferences = getLibraryItemPreferencesFlow()
+            .distinctUntilChanged()
+            .shareIn(viewModelScope, SharingStarted.Lazily, replay = 1)
+
         viewModelScope.launchIO {
             combine(
-                state.map { it.searchQuery }.debounce(0.25.seconds),
-                getLibraryFlow(),
+                state.map { it.searchQuery }.distinctUntilChanged().debounce(0.25.seconds),
+                getLibraryFlow(itemPreferences.map { it.badges }.distinctUntilChanged()),
                 getTracksPerManga.subscribe(),
-                combine(
-                    getTrackingFilterFlow(),
-                    downloadCache.changes,
-                    ::Pair,
-                ),
-                // SY -->
+                combine(itemPreferences, getTrackingFilterFlow(), ::Pair),
                 combine(
                     state.map { it.groupType }.distinctUntilChanged(),
                     libraryPreferences.mangaSortingMode.changes(),
                     ::Pair,
                 ),
-                // SY <--
-            ) { searchQuery, library, tracks, (trackingFilter, _), (groupType, sort) ->
-                library
-                    // SY -->
-                    .applyGrouping(groupType)
-                    // SY <--
-                    .applyFilters(tracks, trackingFilter)
-                    .applySort(tracks, sort.takeIf { groupType != MangaLibraryGroup.BY_DEFAULT }, trackingFilter.keys)
-                    .mapValues { (_, value) ->
-                        if (searchQuery.isNullOrEmpty()) {
-                            value
-                        } else {
-                            val queryNode = QueryNode.from(searchQuery)
-                            value.filter { queryNode.matches(it) }
+            ) { searchQuery, shelf, tracks, (prefs, trackingFilter), (groupType, sort) ->
+                val waitingForDownloads = prefs.downloadFilter != TriState.DISABLED && shelf.checkingDownloads
+                val grouped = shelf.library.applyGrouping(groupType)
+                val results = if (waitingForDownloads) {
+                    grouped.mapValues { emptyList() }
+                } else {
+                    val query = searchQuery?.takeIf(String::isNotEmpty)?.let { QueryNode.from(it) }
+                    val groupSort = sort.takeIf { groupType != MangaLibraryGroup.BY_DEFAULT }
+                    grouped.applyFilters(tracks, trackingFilter, prefs)
+                        .applySort(tracks, groupSort, trackingFilter.keys)
+                        .mapValues { (_, entries) ->
+                            if (query == null) entries else entries.filter { query.matches(it) }
                         }
-                    }
-            }
-                .collectLatest {
-                    lastRenderedLibrary = it
-                    state.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            library = it,
-                        )
-                    }
                 }
+                RenderedLibrary(
+                    library = results,
+                    isLibraryEmpty = shelf.library.values.all { it.isEmpty() },
+                    hasActiveFilters = prefs.hasFilters || trackingFilter.values.any { it != TriState.DISABLED },
+                    checkingDownloads = waitingForDownloads,
+                )
+            }.collectLatest { result ->
+                if (!result.checkingDownloads) lastRenderedLibrary = result
+                state.update { current ->
+                    val retainVisibleItems = result.checkingDownloads && current.library.values.any { it.isNotEmpty() }
+                    current.copy(
+                        isLoading = false,
+                        isLibraryEmpty = result.isLibraryEmpty,
+                        hasActiveFilters = result.hasActiveFilters,
+                        checkingDownloads = result.checkingDownloads,
+                        library = if (retainVisibleItems) current.library else result.library,
+                    )
+                }
+            }
         }
 
         combine(
@@ -198,30 +210,6 @@ class MangaLibraryViewModel(
             }
             .launchIn(viewModelScope)
 
-        combine(
-            getLibraryItemPreferencesFlow(),
-            getTrackingFilterFlow(),
-        ) { prefs, trackFilter ->
-            (
-                listOf(
-                    prefs.filterDownloaded,
-                    prefs.filterUnread,
-                    prefs.filterStarted,
-                    prefs.filterBookmarked,
-                    prefs.filterCompleted,
-                    prefs.filterIntervalCustom,
-                ) +
-                    trackFilter.values
-                ).any { it != TriState.DISABLED }
-        }
-            .distinctUntilChanged()
-            .onEach {
-                state.update { state ->
-                    state.copy(hasActiveFilters = it)
-                }
-            }
-            .launchIn(viewModelScope)
-
         // SY -->
         libraryPreferences.groupMangaLibraryBy.changes()
             .onEach {
@@ -233,14 +221,13 @@ class MangaLibraryViewModel(
         // SY <--
     }
 
-    private suspend fun MangaLibraryMap.applyFilters(
+    private fun MangaLibraryMap.applyFilters(
         trackMap: Map<Long, List<MangaTrack>>,
         trackingFilter: Map<Long, TriState>,
+        prefs: ItemPreferences,
     ): MangaLibraryMap {
-        val prefs = getLibraryItemPreferencesFlow().first()
-        val downloadedOnly = prefs.globalFilterDownloaded
         val skipOutsideReleasePeriod = prefs.skipOutsideReleasePeriod
-        val filterDownloaded = if (downloadedOnly) TriState.ENABLED_IS else prefs.filterDownloaded
+        val filterDownloaded = prefs.downloadFilter
         val filterUnread = prefs.filterUnread
         val filterStarted = prefs.filterStarted
         val filterBookmarked = prefs.filterBookmarked
@@ -429,10 +416,12 @@ class MangaLibraryViewModel(
             libraryPreferences.filterIntervalCustom.changes(),
         ) {
             ItemPreferences(
-                downloadBadge = it[0] as Boolean,
-                unreadBadge = it[1] as Boolean,
-                localBadge = it[2] as Boolean,
-                languageBadge = it[3] as Boolean,
+                badges = BadgePreferences(
+                    download = it[0] as Boolean,
+                    unread = it[1] as Boolean,
+                    local = it[2] as Boolean,
+                    language = it[3] as Boolean,
+                ),
                 skipOutsideReleasePeriod = LibraryPreferences.ENTRY_OUTSIDE_RELEASE_PERIOD in (it[4] as Set<*>),
                 globalFilterDownloaded = it[5] as Boolean,
                 filterDownloaded = it[6] as TriState,
@@ -448,26 +437,29 @@ class MangaLibraryViewModel(
     /**
      * Get the categories and all its manga from the database.
      */
-    private fun getLibraryFlow(): Flow<MangaLibraryMap> {
+    private fun getLibraryFlow(badgePreferences: Flow<BadgePreferences>): Flow<LibrarySnapshot> {
         // Reuse verified disk counters while read progress changes. A chapter/
         // episode being marked read updates the database, not download files;
         // rescanning every download on each read made large libraries freeze.
-        val downloadCountCache = java.util.concurrent.ConcurrentHashMap<Pair<Long, String>, Int>()
+        val downloadCountCache = HashMap<Triple<Long, String, String>, Int>()
+        var countRevision = -1L
 
         val libraryMangasFlow = combine(
             getLibraryManga.subscribe(),
-            getLibraryItemPreferencesFlow(),
-            downloadCache.changes.onEach { downloadCountCache.clear() },
-        ) { libraryMangaList, prefs, _ ->
-            if (prefs.downloadBadge || prefs.filterDownloaded != TriState.DISABLED || prefs.globalFilterDownloaded) {
-                downloadCache.checkLegacyDownloads(libraryMangaList.map { it.manga }.distinctBy { it.id })
+            badgePreferences,
+            downloadCache.changes.runningFold(0L) { revision, _ -> revision + 1 },
+        ) { libraryMangaList, badges, downloadRevision ->
+            if (countRevision != downloadRevision) {
+                countRevision = downloadRevision
+                downloadCountCache.clear()
             }
+            val checkingDownloads = downloadCache.checkLegacyDownloads(libraryMangaList)
             val downloadCounts = HashMap<Long, Int>()
-            libraryMangaList
+            val entries = libraryMangaList
                 .map { libraryManga ->
                     val manga = libraryManga.manga
                     val downloaded = downloadCounts.getOrPut(manga.id) {
-                        downloadCountCache.getOrPut(manga.id to manga.title) {
+                        downloadCountCache.getOrPut(Triple(manga.id, manga.title, manga.ogTitle)) {
                             downloadManager.getDownloadCount(manga)
                         }
                     }
@@ -480,22 +472,22 @@ class MangaLibraryViewModel(
                         sourceName = source.name.lowercase(),
                         sourceLanguage = source.lang,
                         badges = MangaLibraryItem.Badges(
-                            downloadCount = if (prefs.downloadBadge) {
+                            downloadCount = if (badges.download) {
                                 downloaded
                             } else {
                                 0
                             },
-                            unreadCount = if (prefs.unreadBadge) {
+                            unreadCount = if (badges.unread) {
                                 libraryManga.unreadCount
                             } else {
                                 0
                             },
-                            isLocal = if (prefs.localBadge) {
+                            isLocal = if (badges.local) {
                                 libraryManga.manga.isLocal()
                             } else {
                                 false
                             },
-                            sourceLanguage = if (prefs.languageBadge) {
+                            sourceLanguage = if (badges.language) {
                                 source.lang
                             } else {
                                 ""
@@ -504,16 +496,17 @@ class MangaLibraryViewModel(
                     )
                 }
                 .groupBy { it.libraryManga.category }
+            entries to checkingDownloads
         }
 
-        return combine(getCategories.subscribe(), libraryMangasFlow) { categories, libraryManga ->
+        return combine(getCategories.subscribe(), libraryMangasFlow) { categories, (libraryManga, checkingDownloads) ->
             val displayCategories = if (libraryManga.isNotEmpty() && !libraryManga.containsKey(0)) {
                 categories.fastFilterNot { it.isSystemCategory }
             } else {
                 categories
             }
 
-            displayCategories.associateWith { libraryManga[it.id].orEmpty() }
+            LibrarySnapshot(displayCategories.associateWith { libraryManga[it.id].orEmpty() }, checkingDownloads)
         }
     }
 
@@ -1020,12 +1013,25 @@ class MangaLibraryViewModel(
         }.toSortedMap(compareBy { it.order })
     }
 
+    private data class LibrarySnapshot(val library: MangaLibraryMap, val checkingDownloads: Boolean)
+
+    private data class RenderedLibrary(
+        val library: MangaLibraryMap,
+        val isLibraryEmpty: Boolean,
+        val hasActiveFilters: Boolean,
+        val checkingDownloads: Boolean,
+    )
+
+    private data class BadgePreferences(
+        val download: Boolean,
+        val unread: Boolean,
+        val local: Boolean,
+        val language: Boolean,
+    )
+
     @Immutable
     private data class ItemPreferences(
-        val downloadBadge: Boolean,
-        val unreadBadge: Boolean,
-        val localBadge: Boolean,
-        val languageBadge: Boolean,
+        val badges: BadgePreferences,
         val skipOutsideReleasePeriod: Boolean,
 
         val globalFilterDownloaded: Boolean,
@@ -1035,11 +1041,24 @@ class MangaLibraryViewModel(
         val filterBookmarked: TriState,
         val filterCompleted: TriState,
         val filterIntervalCustom: TriState,
-    )
+    ) {
+        val downloadFilter = if (globalFilterDownloaded) TriState.ENABLED_IS else filterDownloaded
+
+        val hasFilters = listOf(
+            downloadFilter,
+            filterUnread,
+            filterStarted,
+            filterBookmarked,
+            filterCompleted,
+            filterIntervalCustom,
+        ).any { it != TriState.DISABLED }
+    }
 
     @Immutable
     data class State(
         val isLoading: Boolean = true,
+        val isLibraryEmpty: Boolean = false,
+        val checkingDownloads: Boolean = false,
         val library: MangaLibraryMap = emptyMap(),
         val searchQuery: String? = null,
         val selection: PersistentList<LibraryManga> = persistentListOf(),
@@ -1058,8 +1077,6 @@ class MangaLibraryViewModel(
                 .fastDistinctBy { it.libraryManga.manga.id }
                 .size
         }
-
-        val isLibraryEmpty by lazy { libraryCount == 0 }
 
         val selectionMode = selection.isNotEmpty()
 
@@ -1083,7 +1100,7 @@ class MangaLibraryViewModel(
         }
 
         fun getLibraryItemsByPage(page: Int): List<MangaLibraryItem> {
-            return library.values.toTypedArray().getOrNull(page).orEmpty()
+            return categories.getOrNull(page)?.let(library::get).orEmpty()
         }
 
         fun getMangaCountForCategory(category: Category): Int? {

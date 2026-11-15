@@ -33,6 +33,7 @@ fun MangaLibraryPager(
     state: PagerState,
     contentPadding: PaddingValues,
     hasActiveFilters: Boolean,
+    checkingDownloads: Boolean,
     selectedManga: List<LibraryManga>,
     searchQuery: String?,
     onGlobalSearchClicked: () -> Unit,
@@ -59,6 +60,7 @@ fun MangaLibraryPager(
             val library = getLibraryForPage(page)
 
             if (library.isEmpty()) {
+                if (checkingDownloads) return@HorizontalPager
                 LibraryPagerEmptyScreen(
                     searchQuery = searchQuery,
                     hasActiveFilters = hasActiveFilters,

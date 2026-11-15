@@ -335,7 +335,6 @@ class MangaDownloader(
                     manga.title,
                     source,
                     manga.url,
-                    checkLegacy = false,
                 ) == null
             }
             // Add chapters to queue from the start.

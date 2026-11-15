@@ -173,7 +173,7 @@ data object MangaLibraryTab : Tab {
                     onClickFilter = viewModel::showSettingsDialog,
                     onClickRefresh = {
                         onClickRefresh(
-                            state.categories[viewModel.activeCategoryIndex],
+                            state.categories.getOrNull(viewModel.activeCategoryIndex),
                         )
                     },
                     onClickGlobalUpdate = { onClickRefresh(null) },
@@ -252,6 +252,7 @@ data object MangaLibraryTab : Tab {
                         contentPadding = contentPadding,
                         currentPage = { viewModel.activeCategoryIndex },
                         hasActiveFilters = state.hasActiveFilters,
+                        checkingDownloads = state.checkingDownloads,
                         showPageTabs = state.showCategoryTabs || !state.searchQuery.isNullOrEmpty(),
                         onChangeCurrentPage = { viewModel.activeCategoryIndex = it },
                         onMangaClicked = { navigator.push(MangaScreen(it)) },
