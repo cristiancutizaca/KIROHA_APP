@@ -10,6 +10,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kiroha.core.LegacyChapterMatcher
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import mihon.core.archive.archiveReader
 import org.xmlpull.v1.XmlPullParser
 import tachiyomi.domain.entries.manga.model.Manga
@@ -38,7 +40,7 @@ internal class LegacyMangaDownloadScanner(
     private val context: Context,
     private val provider: MangaDownloadProvider,
 ) {
-    fun scan(
+    suspend fun scan(
         manga: Manga,
         source: MangaSource,
         chapters: List<Chapter>,
@@ -88,9 +90,12 @@ internal class LegacyMangaDownloadScanner(
         val identified = mutableMapOf<String, LegacyMangaDownloads.Download>()
         val unidentified = mutableSetOf<String>()
         val identifiedNames = mutableSetOf<String>()
+        val scanContext = currentCoroutineContext()
         for (folder in folders) {
+            scanContext.ensureActive()
             val mayUseTitle = folder.uri in uniquelyOwnedFolders
             val entries = folder.listFiles().orEmpty().mapNotNull { file ->
+                scanContext.ensureActive()
                 val name = file.name?.takeUnless(String::isBlank) ?: return@mapNotNull null
                 if (name.endsWith(MangaDownloader.TMP_DIR_SUFFIX, ignoreCase = true) || name.startsWith('.')) {
                     return@mapNotNull null
@@ -102,6 +107,7 @@ internal class LegacyMangaDownloadScanner(
             }
             val singleDownload = entries.map { it.first }.distinct().size == 1
             for ((name, entry) in entries) {
+                scanContext.ensureActive()
                 val (file, links) = entry
                 val galleryVerified = links.any { link -> mangaUrls.any { it.matches(link, mayUseTitle) } }
                 if (!mayUseTitle && !galleryVerified) continue

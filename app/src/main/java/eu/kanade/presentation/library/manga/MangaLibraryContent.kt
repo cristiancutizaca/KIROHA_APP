@@ -1,14 +1,11 @@
 package eu.kanade.presentation.library.manga
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -100,26 +97,21 @@ fun MangaLibraryContent(
             },
             enabled = notSelectionMode,
         ) {
-            Box {
-                MangaLibraryPager(
-                    state = pagerState,
-                    contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
-                    hasActiveFilters = hasActiveFilters,
-                    checkingDownloads = checkingDownloads,
-                    selectedManga = selection,
-                    searchQuery = searchQuery,
-                    onGlobalSearchClicked = onGlobalSearchClicked,
-                    getDisplayMode = getDisplayMode,
-                    getColumnsForOrientation = getColumnsForOrientation,
-                    getLibraryForPage = getLibraryForPage,
-                    onClickManga = onClickManga,
-                    onLongClickManga = onToggleRangeSelection,
-                    onClickContinueReading = onContinueReadingClicked,
-                )
-                if (checkingDownloads) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
+            MangaLibraryPager(
+                state = pagerState,
+                contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+                hasActiveFilters = hasActiveFilters,
+                checkingDownloads = checkingDownloads,
+                selectedManga = selection,
+                searchQuery = searchQuery,
+                onGlobalSearchClicked = onGlobalSearchClicked,
+                getDisplayMode = getDisplayMode,
+                getColumnsForOrientation = getColumnsForOrientation,
+                getLibraryForPage = getLibraryForPage,
+                onClickManga = onClickManga,
+                onLongClickManga = onToggleRangeSelection,
+                onClickContinueReading = onContinueReadingClicked,
+            )
         }
 
         LaunchedEffect(pagerState.currentPage) {

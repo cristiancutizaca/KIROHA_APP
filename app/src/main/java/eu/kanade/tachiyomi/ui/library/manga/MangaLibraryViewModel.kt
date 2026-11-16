@@ -135,6 +135,7 @@ class MangaLibraryViewModel(
                     library = it.library,
                     isLibraryEmpty = it.isLibraryEmpty,
                     hasActiveFilters = it.hasActiveFilters,
+                    checkingDownloads = it.checkingDownloads,
                 )
             } ?: State(),
         )
@@ -160,35 +161,29 @@ class MangaLibraryViewModel(
                     ::Pair,
                 ),
             ) { searchQuery, shelf, tracks, (prefs, trackingFilter), (groupType, sort) ->
-                val waitingForDownloads = prefs.downloadFilter != TriState.DISABLED && shelf.checkingDownloads
                 val grouped = shelf.library.applyGrouping(groupType)
-                val results = if (waitingForDownloads) {
-                    grouped.mapValues { emptyList() }
-                } else {
-                    val query = searchQuery?.takeIf(String::isNotEmpty)?.let { QueryNode.from(it) }
-                    val groupSort = sort.takeIf { groupType != MangaLibraryGroup.BY_DEFAULT }
-                    grouped.applyFilters(tracks, trackingFilter, prefs)
-                        .applySort(tracks, groupSort, trackingFilter.keys)
-                        .mapValues { (_, entries) ->
-                            if (query == null) entries else entries.filter { query.matches(it) }
-                        }
-                }
+                val query = searchQuery?.takeIf(String::isNotEmpty)?.let { QueryNode.from(it) }
+                val groupSort = sort.takeIf { groupType != MangaLibraryGroup.BY_DEFAULT }
+                val results = grouped.applyFilters(tracks, trackingFilter, prefs)
+                    .applySort(tracks, groupSort, trackingFilter.keys)
+                    .mapValues { (_, entries) ->
+                        if (query == null) entries else entries.filter { query.matches(it) }
+                    }
                 RenderedLibrary(
                     library = results,
                     isLibraryEmpty = shelf.library.values.all { it.isEmpty() },
                     hasActiveFilters = prefs.hasFilters || trackingFilter.values.any { it != TriState.DISABLED },
-                    checkingDownloads = waitingForDownloads,
+                    checkingDownloads = prefs.downloadFilter != TriState.DISABLED && shelf.checkingDownloads,
                 )
             }.collectLatest { result ->
-                if (!result.checkingDownloads) lastRenderedLibrary = result
+                lastRenderedLibrary = result
                 state.update { current ->
-                    val retainVisibleItems = result.checkingDownloads && current.library.values.any { it.isNotEmpty() }
                     current.copy(
                         isLoading = false,
                         isLibraryEmpty = result.isLibraryEmpty,
                         hasActiveFilters = result.hasActiveFilters,
                         checkingDownloads = result.checkingDownloads,
-                        library = if (retainVisibleItems) current.library else result.library,
+                        library = result.library,
                     )
                 }
             }
@@ -460,7 +455,7 @@ class MangaLibraryViewModel(
                     val manga = libraryManga.manga
                     val downloaded = downloadCounts.getOrPut(manga.id) {
                         downloadCountCache.getOrPut(Triple(manga.id, manga.title, manga.ogTitle)) {
-                            downloadManager.getDownloadCount(manga)
+                            downloadCache.getCachedDownloadCount(manga)
                         }
                     }
                     val source = sourceManager.getOrStub(manga.source)

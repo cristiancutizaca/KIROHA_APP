@@ -5,6 +5,7 @@ import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.util.lang.Hash
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
@@ -50,7 +51,7 @@ class LegacyMangaDownloadsTest {
     }
 
     @Test
-    fun countsAnOldCbzEvenWhenTheRestoredLibraryLacksChapterRows() {
+    fun countsAnOldCbzEvenWhenTheRestoredLibraryLacksChapterRows() = runTest {
         val archive = cbz("Capítulo 1.cbz")
         val incompleteFolder = mockk<UniFile> {
             every { name } returns "Capítulo 2_tmp"
@@ -66,7 +67,7 @@ class LegacyMangaDownloadsTest {
     }
 
     @Test
-    fun readsMihonChapterHashesAndDoesNotCountTheKirohaCopyTwice() {
+    fun readsMihonChapterHashesAndDoesNotCountTheKirohaCopyTwice() = runTest {
         val legacyHash = Hash.md5(second.url).take(6)
         val archive = cbz("Group_Capítulo 2_$legacyHash.cbz")
         val firstFile = cbz("Capítulo 1.cbz")
@@ -81,7 +82,7 @@ class LegacyMangaDownloadsTest {
     }
 
     @Test
-    fun titleOnlyFilesInAnAmbiguousFolderRemainUnassigned() {
+    fun titleOnlyFilesInAnAmbiguousFolderRemainUnassigned() = runTest {
         val folder = folder(cbz("Capítulo 1.cbz"))
 
         val result = scanner.scan(manga, source, listOf(first), listOf(folder), emptySet())

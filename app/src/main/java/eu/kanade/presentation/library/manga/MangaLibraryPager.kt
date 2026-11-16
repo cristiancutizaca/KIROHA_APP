@@ -60,10 +60,10 @@ fun MangaLibraryPager(
             val library = getLibraryForPage(page)
 
             if (library.isEmpty()) {
-                if (checkingDownloads) return@HorizontalPager
                 LibraryPagerEmptyScreen(
                     searchQuery = searchQuery,
                     hasActiveFilters = hasActiveFilters,
+                    checkingDownloads = checkingDownloads,
                     contentPadding = contentPadding,
                     onGlobalSearchClicked = onGlobalSearchClicked,
                 )
@@ -142,10 +142,12 @@ fun MangaLibraryPager(
 private fun LibraryPagerEmptyScreen(
     searchQuery: String?,
     hasActiveFilters: Boolean,
+    checkingDownloads: Boolean,
     contentPadding: PaddingValues,
     onGlobalSearchClicked: () -> Unit,
 ) {
     val msg = when {
+        checkingDownloads -> MR.strings.kiroha_checking_saved_downloads
         !searchQuery.isNullOrEmpty() -> MR.strings.no_results_found
         hasActiveFilters -> MR.strings.error_no_match
         else -> MR.strings.information_no_manga_category

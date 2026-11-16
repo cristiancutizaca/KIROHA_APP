@@ -43,13 +43,17 @@ class MangaDownloadProvider(
         val galleries: Map<String, List<UniFile>>,
     )
 
-    private val legacyFolderIndex = ConcurrentHashMap<Long, LegacySourceFolders>()
-    private var sourceFolders: Pair<String, List<UniFile>>? = null
+    private class LegacyFolderIndex {
+        val bySource = ConcurrentHashMap<Long, LegacySourceFolders>()
+        var sourceFolders: Pair<String, List<UniFile>>? = null
+    }
 
-    @Synchronized
+    @Volatile
+    private var legacyFolderIndex = LegacyFolderIndex()
+
     fun invalidateLegacyFolderIndex() {
-        sourceFolders = null
-        legacyFolderIndex.clear()
+        // A SAF directory listing can block. Retire its snapshot without waiting for it to return.
+        legacyFolderIndex = LegacyFolderIndex()
     }
 
     /**
@@ -118,7 +122,7 @@ class MangaDownloadProvider(
     }
 
     fun isLegacyMangaTitleKnownAbsent(mangaTitle: String, sourceId: Long): Boolean {
-        val folders = legacyFolderIndex[sourceId] ?: return false
+        val folders = legacyFolderIndex.bySource[sourceId] ?: return false
         return legacyTitleNames(mangaTitle).none { it in folders.galleries }
     }
 
@@ -130,17 +134,22 @@ class MangaDownloadProvider(
     @Synchronized
     internal fun findLegacyMangaFolders(root: UniFile, manga: Manga, source: MangaSource): List<UniFile> {
         val rootUri = root.uri.toString()
-        val index = legacyFolderIndex[source.id]?.takeIf { it.rootUri == rootUri }
-            ?: indexLegacyMangaFolders(root, source).also { legacyFolderIndex[source.id] = it }
+        val folderIndex = legacyFolderIndex
+        val index = folderIndex.bySource[source.id]?.takeIf { it.rootUri == rootUri }
+            ?: indexLegacyMangaFolders(root, source, folderIndex).also { folderIndex.bySource[source.id] = it }
         val titles = legacyTitleNames(manga.title) + legacyTitleNames(manga.ogTitle)
         return titles.flatMap { index.galleries[it].orEmpty() }.distinctBy { it.uri }
     }
 
-    private fun indexLegacyMangaFolders(root: UniFile, source: MangaSource): LegacySourceFolders {
+    private fun indexLegacyMangaFolders(
+        root: UniFile,
+        source: MangaSource,
+        folderIndex: LegacyFolderIndex,
+    ): LegacySourceFolders {
         val rootUri = root.uri.toString()
-        val sourceDirs = sourceFolders?.takeIf { it.first == rootUri }?.second
+        val sourceDirs = folderIndex.sourceFolders?.takeIf { it.first == rootUri }?.second
             ?: root.listFiles().orEmpty().filter { it.isDirectory && !it.name.isNullOrBlank() }
-                .also { sourceFolders = rootUri to it }
+                .also { folderIndex.sourceFolders = rootUri to it }
         val sourceLabels = legacyTitleNames(source.toString()).toMutableSet()
         for (dir in sourceDirs) {
             val name = dir.name.orEmpty()

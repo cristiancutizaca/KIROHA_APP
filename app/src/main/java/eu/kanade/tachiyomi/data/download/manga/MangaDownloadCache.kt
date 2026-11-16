@@ -8,7 +8,6 @@ import com.hippo.unifile.UniFile
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import eu.kanade.tachiyomi.extension.manga.MangaExtensionManager
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.util.size
 import kotlinx.coroutines.CancellationException
@@ -25,6 +24,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
@@ -37,7 +37,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromByteArray
@@ -67,6 +66,7 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -81,7 +81,6 @@ class MangaDownloadCache(
     private val context: Context,
     private val provider: MangaDownloadProvider,
     private val sourceManager: MangaSourceManager,
-    private val extensionManager: MangaExtensionManager,
     private val storageManager: StorageManager,
     private val mangaRepository: MangaRepository,
     private val chapterRepository: ChapterRepository,
@@ -143,9 +142,11 @@ class MangaDownloadCache(
     private val legacyLookupRequests = Channel<LegacyMangaKey>(64)
     private val legacyLookupInFlight = ConcurrentHashMap.newKeySet<LegacyMangaKey>()
     private val legacyScanPermit = Semaphore(1)
+    private val legacyLibraryUpdates = Channel<Unit>(Channel.CONFLATED)
     private val legacyGeneration = AtomicLong(0)
     private var legacyLibraryRequest: Map<LegacyMangaKey, LibraryDownloadEntry>? = null
     private var legacyLibraryScanJob: Job? = null
+    private val legacyMatchesFromLibrary = mutableSetOf<LegacyMangaKey>()
 
     init {
         // Attempt to read cache file
@@ -160,7 +161,6 @@ class MangaDownloadCache(
                         if (diskCache.dir?.uri == rootDownloadsDir.dir?.uri && diskCache.dir != null) {
                             rootDownloadsDir = diskCache
                             lastRenew = diskCacheFile.lastModified()
-                            _changes.trySend(Unit)
                         }
                     }
                 }
@@ -172,13 +172,13 @@ class MangaDownloadCache(
             } finally {
                 diskCacheReady.value = true
                 renewCache()
+                _changes.trySend(Unit)
             }
         }
 
         scope.launchIO {
             for (key in legacyLookupRequests) {
                 try {
-                    extensionManager.isInitialized.first { it }
                     sourceManager.isInitialized.first { it }
                     val manga = mangaRepository.getMangaByUrlAndSourceId(key.mangaUrl, key.sourceId) ?: continue
                     val source = sourceManager.getOrStub(key.sourceId)
@@ -194,6 +194,22 @@ class MangaDownloadCache(
                 }
             }
         }
+
+        // Publish verified downloads during long scans without rebuilding the grid for every match.
+        legacyLibraryUpdates.receiveAsFlow()
+            .onEach {
+                _changes.trySend(Unit)
+                delay(500.milliseconds)
+            }
+            .launchIn(scope)
+
+        sourceManager.isInitialized
+            .filter { it }
+            .onEach {
+                renewCache()
+                _changes.trySend(Unit)
+            }
+            .launchIn(scope)
 
         storageManager.changes
             .onEach {
@@ -353,6 +369,10 @@ class MangaDownloadCache(
 
     fun getDownloadCount(manga: Manga): Int {
         renewCache()
+        return getCachedDownloadCount(manga)
+    }
+
+    internal fun getCachedDownloadCount(manga: Manga): Int {
         if (manga.url.isBlank()) return 0
         val current = getCurrentChapterNames(manga.source, manga.title, manga.url)
         val legacy = legacyDownloads[LegacyMangaKey(manga)]?.takeIf {
@@ -367,6 +387,10 @@ class MangaDownloadCache(
      */
     @Synchronized
     fun checkLegacyDownloads(library: List<LibraryManga>): Boolean {
+        renewCache()
+        val waitingForInitialIndex = !diskCacheReady.value || (lastRenew == 0L && renewalJob?.isActive == true)
+        if (!diskCacheReady.value || !sourceManager.isInitialized.value) return waitingForInitialIndex
+
         val entries = library.asSequence().filter { !it.manga.isLocal() && it.manga.url.isNotBlank() }
             .associateBy { LegacyMangaKey(it.manga) }
         val request = entries.mapValues { (_, entry) ->
@@ -379,9 +403,14 @@ class MangaDownloadCache(
             if (entries.isNotEmpty()) {
                 legacyLibraryScanJob = scope.launchIO {
                     try {
-                        extensionManager.isInitialized.first { it }
-                        sourceManager.isInitialized.first { it }
-                        val scans = scanLegacyLibrary(entries.values.map { it.manga })
+                        val scans = scanLegacyLibrary(entries.values.map { it.manga }) { key, entry ->
+                            synchronized(this@MangaDownloadCache) {
+                                if (generation == legacyGeneration.get() && legacyLibraryRequest === request) {
+                                    legacyMatchesFromLibrary.add(key)
+                                    if (legacyDownloads.put(key, entry) != entry) legacyLibraryUpdates.trySend(Unit)
+                                }
+                            }
+                        }
                         synchronized(this@MangaDownloadCache) {
                             if (generation == legacyGeneration.get() && legacyLibraryRequest === request) {
                                 val removedFavorites = legacyMatchesFromLibrary - request.keys
@@ -390,7 +419,8 @@ class MangaDownloadCache(
                                     val entry = scans[key]
                                     if (entry == null) legacyDownloads.remove(key) else legacyDownloads[key] = entry
                                 }
-                                legacyMatchesFromLibrary = scans.keys
+                                legacyMatchesFromLibrary.clear()
+                                legacyMatchesFromLibrary.addAll(scans.keys)
                             }
                         }
                     } catch (cancelled: CancellationException) {
@@ -401,17 +431,17 @@ class MangaDownloadCache(
                 }.also { job -> job.invokeOnCompletion { _changes.trySend(Unit) } }
             } else {
                 legacyMatchesFromLibrary.forEach(legacyDownloads::remove)
-                legacyMatchesFromLibrary = emptySet()
+                legacyMatchesFromLibrary.clear()
                 legacyLibraryScanJob = null
             }
         }
-        return legacyLibraryScanJob?.isActive == true || !diskCacheReady.value ||
-            (lastRenew == 0L && renewalJob?.isActive == true)
+        return legacyLibraryScanJob?.isActive == true || waitingForInitialIndex
     }
 
-    private var legacyMatchesFromLibrary: Set<LegacyMangaKey> = emptySet()
-
-    private suspend fun scanLegacyLibrary(mangas: List<Manga>): Map<LegacyMangaKey, CachedLegacyManga> {
+    private suspend fun scanLegacyLibrary(
+        mangas: List<Manga>,
+        onMatch: (LegacyMangaKey, CachedLegacyManga) -> Unit,
+    ): Map<LegacyMangaKey, CachedLegacyManga> {
         val root = storageManager.getDownloadsDirectory() ?: return emptyMap()
         val sources = mutableMapOf<Long, MangaSource>()
         val work = mangas.mapNotNull { manga ->
@@ -437,7 +467,9 @@ class MangaDownloadCache(
                     val downloads = legacyScanPermit.withPermit {
                         legacyScanner.scan(manga, source, chapters, folders, uniqueFolders)
                     }
-                    put(key, CachedLegacyManga(manga.title, manga.ogTitle, downloads))
+                    val entry = CachedLegacyManga(manga.title, manga.ogTitle, downloads)
+                    put(key, entry)
+                    if (downloads.files.isNotEmpty() || downloads.unmatchedCount > 0) onMatch(key, entry)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -582,16 +614,18 @@ class MangaDownloadCache(
     }
 
     fun requestReindex() {
-        scope.launchIO { invalidateCache() }
+        scope.launchIO { invalidateCache(keepLegacyDownloads = true) }
     }
 
     @Synchronized
-    fun invalidateCache() {
+    fun invalidateCache(keepLegacyDownloads: Boolean = false) {
         legacyGeneration.incrementAndGet()
-        legacyDownloads.clear()
+        if (!keepLegacyDownloads) {
+            legacyDownloads.clear()
+            legacyMatchesFromLibrary.clear()
+        }
         legacyLibraryScanJob?.cancel()
         legacyLibraryRequest = null
-        legacyMatchesFromLibrary = emptySet()
         provider.invalidateLegacyFolderIndex()
         lastRenew = 0L
         nextRenewAttempt = 0L
@@ -608,7 +642,7 @@ class MangaDownloadCache(
     private fun renewCache() {
         // Avoid renewing cache if in the process nor too often
         val now = System.currentTimeMillis()
-        if (!diskCacheReady.value || lastRenew + renewInterval >= now ||
+        if (!diskCacheReady.value || !sourceManager.isInitialized.value || lastRenew + renewInterval >= now ||
             nextRenewAttempt > now || renewalJob?.isActive == true
         ) {
             return
@@ -623,14 +657,7 @@ class MangaDownloadCache(
             }
 
             try {
-                // Try to wait until extensions and sources have loaded
-                val sources = withTimeoutOrNull(30.seconds) {
-                    extensionManager.isInitialized.first { it }
-                    sourceManager.isInitialized.first { it }
-                    getSources()
-                } ?: return@launchIO
-
-                val sourceMap = sources.associate { provider.getSourceDirName(it).lowercase() to it.id }
+                val sourceMap = getSources().associate { provider.getSourceDirName(it).lowercase() to it.id }
 
                 rootDownloadsDirMutex.withLock {
                     val updatedRootDir = RootDirectory(storageManager.getDownloadsDirectory())
@@ -686,8 +713,7 @@ class MangaDownloadCache(
                 if (exception != null && exception !is CancellationException) {
                     logcat(LogPriority.ERROR, exception) { "DownloadCache: failed to create cache" }
                 }
-                // An unavailable extension registry or failed SAF scan must
-                // not freeze a stale/empty index for an entire hour.
+                // Retry failed filesystem scans without the normal one-hour interval.
                 lastRenew = if (exception == null && indexedSuccessfully) System.currentTimeMillis() else 0L
                 if (indexedSuccessfully && exception == null) notifyChanges() else _changes.trySend(Unit)
             }
