@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.download.manga
 import android.content.Context
 import android.net.Uri
 import android.util.Xml
+import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.source.model.SChapter
@@ -12,6 +13,8 @@ import kiroha.core.LegacyChapterMatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import mihon.core.archive.archiveReader
 import org.xmlpull.v1.XmlPullParser
 import tachiyomi.domain.entries.manga.model.Manga
@@ -21,13 +24,25 @@ import java.io.File
 import java.io.InputStream
 import java.net.URI
 import java.util.zip.ZipFile
+import kotlin.coroutines.CoroutineContext
 
 internal data class LegacyMangaDownloads(
     val chapterUrls: Set<String>,
     val files: Map<String, Download>,
     val unmatchedCount: Int,
 ) {
-    data class Download(val file: UniFile, val currentNames: Set<String>)
+    @Serializable
+    data class Download(
+        val uri: String,
+        val currentNames: Set<String>,
+        @Transient private val localFile: UniFile? = null,
+    ) {
+        constructor(file: UniFile, currentNames: Set<String>) : this(file.uri.toString(), currentNames, file)
+
+        fun resolve(context: Context): UniFile? = localFile ?: UniFile.fromUri(context, uri.toUri())
+    }
+
+    val hasFiles: Boolean get() = files.isNotEmpty() || unmatchedCount > 0
 
     fun additionalCount(currentNames: Set<String>): Int {
         val overlapping = files.values.count { it.currentNames.any(currentNames::contains) }
@@ -102,7 +117,7 @@ internal class LegacyMangaDownloadScanner(
                 }
                 if (!file.isDirectory && !name.endsWith(".cbz", ignoreCase = true)) return@mapNotNull null
                 val stem = name.lowercase().removeSuffix(".cbz")
-                val links = readPageMetadata(file) ?: return@mapNotNull null
+                val links = readPageMetadata(file, scanContext) ?: return@mapNotNull null
                 stem to (file to links)
             }
             val singleDownload = entries.map { it.first }.distinct().size == 1
@@ -139,7 +154,7 @@ internal class LegacyMangaDownloadScanner(
 
     // A completed directory or archive has at least one image. Look at names
     // and small ComicInfo metadata only, without decoding any pages.
-    private fun readPageMetadata(file: UniFile): Set<WebUrl>? {
+    private fun readPageMetadata(file: UniFile, scanContext: CoroutineContext): Set<WebUrl>? {
         return try {
             when {
                 file.isDirectory -> {
@@ -161,15 +176,29 @@ internal class LegacyMangaDownloadScanner(
                     }
                 }
 
-                else -> file.archiveReader(context).use { archive ->
-                    if (!archive.useEntries { entries -> entries.any { it.isFile && isImage(it.name) } }) return null
-                    archive.getInputStream("ComicInfo.xml")?.use(::readComicInfo).orEmpty()
-                }
+                else -> readDocumentArchive(file, scanContext)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun readDocumentArchive(file: UniFile, scanContext: CoroutineContext): Set<WebUrl>? {
+        return file.archiveReader(context).use { archive ->
+            archive.useEntryStream { nextEntry, data ->
+                var hasImage = false
+                var links: Set<WebUrl>? = null
+                while (!hasImage || links == null) {
+                    scanContext.ensureActive()
+                    val entry = nextEntry() ?: break
+                    if (!entry.isFile) continue
+                    if (isImage(entry.name)) hasImage = true
+                    if (entry.name == "ComicInfo.xml" && links == null) links = readComicInfo(data)
+                }
+                if (hasImage) links.orEmpty() else null
+            }
         }
     }
 

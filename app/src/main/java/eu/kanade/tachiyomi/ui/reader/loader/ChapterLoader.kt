@@ -70,7 +70,7 @@ class ChapterLoader(
                 // If the chapter is partially read, set the starting page to the last the user read
                 // otherwise use the requested page.
                 if (!chapter.chapter.read || readerPreferences.preserveReadingPosition.get() || page != null) {
-                    chapter.requestedPage = page ?: chapter.chapter.last_page_read
+                    chapter.requestedPage = (page ?: chapter.chapter.last_page_read).coerceIn(0, pages.lastIndex)
                 }
 
                 chapter.state = ReaderChapter.State.Loaded(pages)

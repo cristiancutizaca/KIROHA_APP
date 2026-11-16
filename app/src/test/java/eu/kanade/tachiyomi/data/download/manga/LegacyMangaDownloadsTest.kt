@@ -75,8 +75,8 @@ class LegacyMangaDownloadsTest {
 
         val result = scanner.scan(manga, source, listOf(first, second), listOf(folder), setOf(folder.uri))
 
-        assertSame(archive, result.files[second.url]?.file)
-        assertSame(firstFile, result.files[first.url]?.file)
+        assertSame(archive, result.files[second.url]?.resolve(mockk()))
+        assertSame(firstFile, result.files[first.url]?.resolve(mockk()))
         val currentName = provider.getChapterDirName(second.name, second.scanlator, second.url).lowercase()
         assertEquals(1, result.additionalCount(setOf(currentName)))
     }

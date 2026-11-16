@@ -39,6 +39,7 @@ import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.main.ResumeSession
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
@@ -70,12 +71,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -160,6 +157,7 @@ class ReaderViewModel(
      */
     val mangaId = savedState.get<Long>("manga") ?: -1L
     private val initialChapterId = savedState.get<Long>("chapter") ?: -1L
+    private val initialPage = savedState.get<Int>("page")?.takeIf { it >= 0 }
 
     val hasValidArgs = mangaId != -1L && initialChapterId != -1L
 
@@ -294,24 +292,14 @@ class ReaderViewModel(
     private val downloadAheadAmount = downloadPreferences.autoDownloadWhileReading.get()
 
     init {
-        // To save state
-        state.map { it.viewerChapters?.currChapter }
-            .distinctUntilChanged()
-            .filterNotNull()
-            .onEach { currentChapter ->
-                if (chapterPageIndex >= 0) {
-                    // Restore from SavedState
-                    currentChapter.requestedPage = chapterPageIndex
-                } else if (!currentChapter.chapter.read) {
-                    currentChapter.requestedPage = currentChapter.chapter.last_page_read
-                }
-                chapterId = currentChapter.chapter.id!!
-            }
-            .launchIn(viewModelScope)
-
         if (hasValidArgs) {
             viewModelScope.launch { init() }
         }
+    }
+
+    internal fun positionForResume(): ResumeSession.ReaderPosition? {
+        if (manga == null || incognitoMode || getCurrentChapter() == null) return null
+        return ResumeSession.ReaderPosition(mangaId, chapterId, chapterPageIndex).takeIf { it.isValid }
     }
 
     override fun onCleared() {
@@ -337,20 +325,13 @@ class ReaderViewModel(
      * with. This method will fetch the manga from the database and initialize the initial chapter.
      * Failures are reported through [State.initError].
      */
-    private val initialPage = savedState.get<Int>("page")?.takeUnless { it == -1 }
-
-    /**
-     * Initializes this presenter with the [mangaId] and [initialChapterId] the reader was launched
-     * with. This method will fetch the manga from the database and initialize the initial chapter.
-     * Failures are reported through [State.initError].
-     */
     private suspend fun init() {
         withIOContext {
             try {
                 val manga = getManga.await(mangaId) ?: error("Requested manga of id $mangaId not found")
                 sourceManager.isInitialized.first { it }
                 mutableState.update { it.copy(manga = manga) }
-                if (chapterId == -1L) chapterId = initialChapterId
+                if (chapterId == -1L) withUIContext { chapterId = initialChapterId }
 
                 val source = sourceManager.getOrStub(manga.source)
                 loader = ChapterLoader(
@@ -366,7 +347,8 @@ class ReaderViewModel(
                     sourcePreferences = sourcePreferences,
                 )
 
-                loadChapter(loader!!, chapterList.first { chapterId == it.chapter.id }, initialPage)
+                val page = chapterPageIndex.takeIf { it >= 0 } ?: initialPage.takeIf { chapterId == initialChapterId }
+                loadChapter(loader!!, chapterList.first { chapterId == it.chapter.id }, page)
             } catch (e: Throwable) {
                 if (e is CancellationException) {
                     throw e
@@ -395,6 +377,8 @@ class ReaderViewModel(
         )
 
         withUIContext {
+            chapterId = chapter.chapter.id!!
+            chapterPageIndex = chapter.requestedPage
             mutableState.update {
                 // Add new references first to avoid unnecessary recycling
                 newChapters.ref()
@@ -523,6 +507,9 @@ class ReaderViewModel(
 
         val selectedChapter = page.chapter
         val pages = selectedChapter.pages ?: return
+        chapterId = selectedChapter.chapter.id!!
+        chapterPageIndex = page.index
+        selectedChapter.requestedPage = page.index
 
         // Save last page read and mark as read if needed
         viewModelScope.launchNonCancellable {
@@ -617,9 +604,6 @@ class ReaderViewModel(
         mutableState.update {
             it.copy(currentPage = pageIndex + 1)
         }
-        readerChapter.requestedPage = pageIndex
-        chapterPageIndex = pageIndex
-
         if (!incognitoMode && page.status != Page.State.ERROR) {
             readerChapter.chapter.last_page_read = pageIndex
 

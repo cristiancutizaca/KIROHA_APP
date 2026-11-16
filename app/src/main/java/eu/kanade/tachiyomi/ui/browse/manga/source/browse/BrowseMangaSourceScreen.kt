@@ -76,7 +76,7 @@ import tachiyomi.source.local.entries.manga.LocalMangaSource
 
 data class BrowseMangaSourceScreen(
     val sourceId: Long,
-    private val listingQuery: String?,
+    internal val listingQuery: String?,
 ) : Screen(), AssistContentScreen {
 
     private var assistUrl: String? = null

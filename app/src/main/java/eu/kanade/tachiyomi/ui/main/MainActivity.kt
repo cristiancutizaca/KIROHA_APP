@@ -37,9 +37,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -63,6 +63,7 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
 import eu.kanade.domain.source.anime.interactor.GetAnimeIncognitoState
 import eu.kanade.domain.source.manga.interactor.GetMangaIncognitoState
+import eu.kanade.domain.ui.model.StartScreen
 import eu.kanade.presentation.components.AppStateBanners
 import eu.kanade.presentation.components.DownloadedOnlyBannerBackgroundColor
 import eu.kanade.presentation.components.IncognitoModeBannerBackgroundColor
@@ -102,6 +103,7 @@ import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
 import eu.kanade.tachiyomi.ui.more.OnboardingScreen
 import eu.kanade.tachiyomi.ui.player.ExternalIntents
 import eu.kanade.tachiyomi.ui.player.PlayerActivity
+import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
 import eu.kanade.tachiyomi.util.system.isNavigationBarNeedsScrim
 import eu.kanade.tachiyomi.util.system.openInBrowser
@@ -164,6 +166,8 @@ class MainActivity : BaseActivity() {
     var ready = false
 
     private var navigator: Navigator? = null
+    private val resumeSession by lazy { ResumeSession(applicationContext) }
+    internal var currentHomeTab: StartScreen? = null
 
     // AM (CONNECTIONS) -->
     @Inject lateinit var connectionsPreferences: ConnectionsPreferences
@@ -183,17 +187,17 @@ class MainActivity : BaseActivity() {
 
         super.onCreate(savedInstanceState)
 
+        // Only discard a duplicate launcher entry. A recreated task may legitimately have a stack.
+        if (isLaunch && !isTaskRoot && intent.isLauncherIntent()) {
+            finish()
+            return
+        }
+
         try {
             com.discord.socialsdk.DiscordSocialSdkInit.setEngineActivity(this)
         } catch (_: Exception) {}
 
         val didMigration = Migrator.awaitAndRelease()
-
-        // Do not let the launcher create a new activity http://stackoverflow.com/questions/16283079
-        if (!isTaskRoot) {
-            finish()
-            return
-        }
 
         // AM (DISCORD) -->
         // Initialize Discord RPC Manager early so native library is loaded
@@ -236,10 +240,14 @@ class MainActivity : BaseActivity() {
 
                 LaunchedEffect(navigator) {
                     this@MainActivity.navigator = navigator
+                    ready = true
 
                     if (isLaunch) {
-                        // Set start screen
-                        handleIntentAction(intent, navigator)
+                        if (!handleIntentAction(intent, navigator) && intent.isLauncherIntent() &&
+                            !preferences.incognitoMode.get()
+                        ) {
+                            restoreLastPosition(navigator)
+                        }
 
                         // Reset Incognito Mode on relaunch
                         preferences.incognitoMode.set(false)
@@ -652,11 +660,84 @@ class MainActivity : BaseActivity() {
         }
     }
 
+    private suspend fun restoreLastPosition(navigator: Navigator) {
+        val position = resumeSession.mainPosition()
+        val tab = when (StartScreen.entries.firstOrNull { it.name == position?.tab }) {
+            StartScreen.HOME -> HomeScreen.Tab.Home
+            StartScreen.ANIME -> HomeScreen.Tab.AnimeLib()
+            StartScreen.MANGA -> HomeScreen.Tab.Library()
+            StartScreen.UPDATES -> HomeScreen.Tab.Updates
+            StartScreen.HISTORY -> HomeScreen.Tab.History
+            StartScreen.BROWSE -> HomeScreen.Tab.Browse()
+            null -> null
+        }
+        tab?.let { HomeScreen.openTab(it) }
+
+        val reader = resumeSession.readerPosition()
+        if (reader != null) {
+            val manga = graph.getManga.await(reader.mangaId)
+            val chapter = graph.getChapter.await(reader.chapterId)
+            if (manga != null && chapter != null && chapter.mangaId == manga.id &&
+                !getMangaIncognitoState.await(manga.source)
+            ) {
+                navigator.push(MangaScreen(manga.id))
+                startActivity(ReaderActivity.newIntent(this, manga.id, chapter.id, reader.page))
+                return
+            }
+            resumeSession.saveReader(null)
+        }
+
+        val manga = position?.mangaId?.let { graph.getManga.await(it) }
+        val sourceId = position?.sourceId
+        if (manga != null && !getMangaIncognitoState.await(manga.source)) {
+            navigator.push(MangaScreen(manga.id, fromSource = position.mangaFromSource))
+        } else if (sourceId != null && !getMangaIncognitoState.await(sourceId)) {
+            navigator.push(BrowseMangaSourceScreen(sourceId, position.sourceQuery))
+        }
+    }
+
+    private fun saveLastPosition() {
+        val screen = navigator?.lastItem ?: return
+        if (isFinishing || preferences.incognitoMode.get()) {
+            resumeSession.clear()
+            return
+        }
+
+        val tab = currentHomeTab?.name
+        val position = when (screen) {
+            is MangaScreen -> {
+                val source = screen.loadedSourceId
+                if (source != null && !getMangaIncognitoState.await(source)) {
+                    ResumeSession.MainPosition(tab, mangaId = screen.mangaId, mangaFromSource = screen.fromSource)
+                } else {
+                    ResumeSession.MainPosition(tab)
+                }
+            }
+
+            is BrowseMangaSourceScreen -> {
+                if (getMangaIncognitoState.await(screen.sourceId)) {
+                    ResumeSession.MainPosition(tab)
+                } else {
+                    ResumeSession.MainPosition(tab, sourceId = screen.sourceId, sourceQuery = screen.listingQuery)
+                }
+            }
+
+            else -> ResumeSession.MainPosition(tab)
+        }
+        resumeSession.saveMain(position)
+    }
+
     // AM -->
     override fun onResume() {
         super.onResume()
         mpvConfig.copyFiles()
     }
+
+    override fun onPause() {
+        if (!isChangingConfigurations) saveLastPosition()
+        super.onPause()
+    }
+
     override fun onStop() {
         if (BuildConfig.DEBUG) {
             val runtime = Runtime.getRuntime()
@@ -676,6 +757,10 @@ class MainActivity : BaseActivity() {
     }
 
     // <-- AM
+
+    private fun Intent.isLauncherIntent(): Boolean =
+        action == Intent.ACTION_MAIN &&
+            (hasCategory(Intent.CATEGORY_LAUNCHER) || hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER))
 
     private fun Intent.isAddMangaExtensionStoreIntent(): Boolean {
         return (scheme == "tachiyomi" && data?.host == "add-repo") ||

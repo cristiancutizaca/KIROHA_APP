@@ -46,6 +46,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabNavigator
 import eu.kanade.core.preference.asState
+import eu.kanade.domain.ui.model.StartScreen
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
@@ -55,6 +56,7 @@ import eu.kanade.tachiyomi.ui.entries.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.history.HistoriesTab
 import eu.kanade.tachiyomi.ui.library.anime.AnimeLibraryTab
 import eu.kanade.tachiyomi.ui.library.manga.MangaLibraryTab
+import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.more.MoreTab
 import eu.kanade.tachiyomi.ui.player.CastManager
 import eu.kanade.tachiyomi.ui.player.cast.CastMiniController
@@ -120,6 +122,11 @@ object HomeScreen : Screen() {
             tab = effectiveStartTab,
             key = TAB_NAVIGATOR_KEY,
         ) { tabNavigator ->
+            LaunchedEffect(tabNavigator.current) {
+                (activity as? MainActivity)?.currentHomeTab = StartScreen.entries.firstOrNull {
+                    it.tab::class == tabNavigator.current::class
+                }
+            }
             // Provide usable navigator to content screen
             CompositionLocalProvider(LocalNavigator provides navigator) {
                 Scaffold(

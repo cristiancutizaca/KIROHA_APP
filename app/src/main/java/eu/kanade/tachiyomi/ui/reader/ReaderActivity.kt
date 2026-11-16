@@ -74,6 +74,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.main.MainActivity
+import eu.kanade.tachiyomi.ui.main.ResumeSession
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibraryFirst
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
@@ -131,6 +132,7 @@ import kotlin.time.Duration.Companion.seconds
 class ReaderActivity : BaseActivity() {
 
     private val graph: AppGraph by lazy { metroGraph() }
+    private val resumeSession by lazy { ResumeSession(applicationContext) }
 
     companion object {
         fun newIntent(
@@ -306,6 +308,13 @@ class ReaderActivity : BaseActivity() {
     override fun onPause() {
         viewModel.flushReadTimer()
         super.onPause()
+    }
+
+    override fun onStop() {
+        if (!isChangingConfigurations) {
+            resumeSession.saveReader(if (isFinishing) null else viewModel.positionForResume())
+        }
+        super.onStop()
     }
 
     /**

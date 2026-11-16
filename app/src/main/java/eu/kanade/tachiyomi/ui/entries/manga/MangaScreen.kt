@@ -73,11 +73,13 @@ import tachiyomi.domain.items.chapter.model.Chapter
 import tachiyomi.presentation.core.screens.LoadingScreen
 
 class MangaScreen(
-    private val mangaId: Long,
+    internal val mangaId: Long,
     val fromSource: Boolean = false,
 ) : Screen(), AssistContentScreen {
 
     private var assistUrl: String? = null
+    internal var loadedSourceId: Long? = null
+        private set
 
     override fun onProvideAssistUrl() = assistUrl
 
@@ -107,6 +109,7 @@ class MangaScreen(
         val isHttpSource = remember { successState.source is HttpSource }
 
         LaunchedEffect(successState.manga, viewModel.source) {
+            loadedSourceId = successState.manga.source
             if (isHttpSource) {
                 try {
                     withIOContext {
